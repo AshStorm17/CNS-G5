@@ -16,7 +16,7 @@ The project involves developing two main components: an ATM client (atm) and a B
 |------------------|-------------|
 | Aashmun Gupta    | 22110005    |
 | Aryan Sahu       | 22110038    |
-| Aayush Parmar    | 22110       |
-| Mrugank Patil    | 22110       |
+| Aayush Parmar    | 22110181    |
+| Mrugank Patil    | 22110158    |
 | Arjun Sekar      | 22110       |
 | Pratyaksh Bhayre | 22110       |
