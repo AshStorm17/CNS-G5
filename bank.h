@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <iomanip>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -25,15 +25,23 @@
 
 // Hash the pin using a secure hashing algorithm
 std::string hashPin(const std::string& pin) {
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, pin.c_str(), pin.size());
-    SHA256_Final(hash, &sha256);
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    const EVP_MD* md = EVP_sha256();
+
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_length = 0;
+
+    EVP_DigestInit_ex(ctx, md, nullptr);
+    EVP_DigestUpdate(ctx, pin.c_str(), pin.length());
+    EVP_DigestFinal_ex(ctx, hash, &hash_length);
+
+    EVP_MD_CTX_free(ctx);
+
     std::stringstream ss;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    for (unsigned int i = 0; i < hash_length; i++) {
         ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
     }
+
     return ss.str();
 }
 

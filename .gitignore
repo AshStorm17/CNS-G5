@@ -35,3 +35,9 @@ db_config.txt
 bank.sql
 
 bank.txt
+
+*.key
+*.crt
+
+bank
+atm
