@@ -11,7 +11,80 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <openssl/ssl.h> // Added for SSL support
+#include <openssl/err.h> // Added for SSL error handling
 #include <sstream>
+#include <fstream>
+#include <cstring>
+#include <map>
+#include <string>
+#include <unistd.h>
+#include <iostream>
+
+// Hash the pin using a secure hashing algorithm (e.g., bcrypt)
+std::string hashPin(const std::string& pin) {
+    // Replace with actual bcrypt or other secure hash implementation
+    return "hashed_" + pin;
+}
+
+// Authenticate the client by checking account_number and pin from the database
+bool authenticateClient(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
+    sql::PreparedStatement *pstmt;
+    sql::ResultSet *res;
+    bool authenticated = false;
+
+    // PIN should be hashed before being compared in the database (e.g., bcrypt)
+    std::string hashed_pin = hashPin(pin); // Replace with actual hashing implementation
+
+    pstmt = conn->prepareStatement("SELECT * FROM customers WHERE account_number = ? AND pin = ?");
+    pstmt->setString(1, account_number);
+    pstmt->setString(2, hashed_pin);
+    res = pstmt->executeQuery();
+
+    if (res->next()) {
+        authenticated = true;
+    }
+
+    delete res;
+    delete pstmt;
+    return authenticated;
+}
+
+
+
+// Handle client requests
+void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
+    char buffer[1024];
+    bzero(buffer, 1024);
+
+    // Receive client data securely via SSL
+    int bytes = SSL_read(ssl, buffer, sizeof(buffer));
+    if (bytes <= 0) {
+        std::cerr << "Error receiving data" << std::endl;
+        return;
+    }
+    std::string account_number, pin;
+    
+    // Extract account_number and pin (assuming a simple format "account_number pin")
+    std::istringstream iss(buffer);
+    iss >> account_number >> pin;
+
+    // Add input validation to prevent buffer overflow or SQL injection
+    if (account_number.empty() || pin.empty() || account_number.length() > 20 || pin.length() > 10) {
+        std::string response = "Invalid input format\n";
+        SSL_write(ssl, response.c_str(), response.size());
+        return;
+    }
+
+    if (authenticateClient(account_number, pin, conn)) {
+        std::string response = "Authentication successful\n";
+        SSL_write(ssl, response.c_str(), response.size());
+    } else {
+        std::string response = "Authentication failed\n";
+        SSL_write(ssl, response.c_str(), response.size());
+    }
+}
+
 
 // Function to load authentication details from a file
 std::map<std::string, std::string> loadAuthDetails(const std::string &filename) {
@@ -32,12 +105,37 @@ sql::Connection* initDatabaseConnection(const std::map<std::string, std::string>
     return conn;
 }
 
-// Listen for incoming client connections
-void listenForConnections(int port, const std::map<std::string, std::string>& auth) {
+// Initialize SSL context
+SSL_CTX* initSSLContext() {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    const SSL_METHOD *method = SSLv23_server_method();
+    SSL_CTX *ctx = SSL_CTX_new(method);
+
+    if (!ctx) {
+        std::cerr << "Unable to create SSL context" << std::endl;
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    SSL_CTX_set_ecdh_auto(ctx, 1);
+
+    // Load certificate and private key
+    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0 || 
+        SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+// Listen for incoming client connections over SSL
+void listenForConnections(int port, const std::map<std::string, std::string>& auth, SSL_CTX* ctx) {
     int serverSocket, clientSocket;
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t addr_size = sizeof(clientAddr);
-    
+
     // Create socket
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket < 0) {
@@ -66,55 +164,23 @@ void listenForConnections(int port, const std::map<std::string, std::string>& au
 
     // Accept incoming client connections and handle each one
     while ((clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &addr_size))) {
-        std::cout << "Client connected." << std::endl;
-        sql::Connection *conn = initDatabaseConnection(auth);
-        handleClient(clientSocket, conn);
-        delete conn;
+        SSL *ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, clientSocket);
+
+        if (SSL_accept(ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+        } else {
+            std::cout << "Client connected via SSL." << std::endl;
+            sql::Connection *conn = initDatabaseConnection(auth);
+            handleClient(clientSocket, ssl, conn);
+            delete conn;
+        }
+
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        close(clientSocket);
     }
 }
 
-// Handle client requests
-void handleClient(int clientSocket, sql::Connection *conn) {
-    char buffer[1024];
-    bzero(buffer, 1024);
-
-    // Receive client data (e.g., account number and PIN for authentication)
-    recv(clientSocket, buffer, 1024, 0);
-    std::string account_number, pin;
-    
-    // Extract account_number and pin (assuming a simple format "account_number pin")
-    std::istringstream iss(buffer);
-    iss >> account_number >> pin;
-
-    if (authenticateClient(account_number, pin, conn)) {
-        std::string response = "Authentication successful\n";
-        send(clientSocket, response.c_str(), response.size(), 0);
-    } else {
-        std::string response = "Authentication failed\n";
-        send(clientSocket, response.c_str(), response.size(), 0);
-    }
-
-    close(clientSocket);
-}
-
-// Authenticate the client by checking account_number and pin from the database
-bool authenticateClient(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
-    sql::PreparedStatement *pstmt;
-    sql::ResultSet *res;
-    bool authenticated = false;
-
-    pstmt = conn->prepareStatement("SELECT * FROM customers WHERE account_number = ? AND pin = ?");
-    pstmt->setString(1, account_number);
-    pstmt->setString(2, pin);
-    res = pstmt->executeQuery();
-
-    if (res->next()) {
-        authenticated = true;
-    }
-
-    delete res;
-    delete pstmt;
-    return authenticated;
-}
 
 #endif // BANK_H
