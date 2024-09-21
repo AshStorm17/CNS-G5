@@ -1,10 +1,7 @@
 #include "bank.h"
 #include <iostream>
-#include <fstream>
 #include <map>
 #include <string>
-#include <unistd.h>
-#include <cstring>
 
 int main(int argc, char *argv[]) {
     int opt;
@@ -34,8 +31,12 @@ int main(int argc, char *argv[]) {
     // Load authentication details from auth file
     std::map<std::string, std::string> auth = loadAuthDetails(authFile);
 
-    // Listen for connections
-    listenForConnections(port, auth);
+    // Initialize SSL context
+    SSL_CTX *ctx = initSSLContext();
 
+    // Listen for connections securely using SSL
+    listenForConnections(port, auth, ctx);
+
+    SSL_CTX_free(ctx);
     return 0;
 }
