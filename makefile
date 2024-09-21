@@ -1,32 +1,16 @@
-# Compiler
-CXX = g++
+# Symlink names
+BANK_SYMLINK = bank
+ATM_SYMLINK = atm
 
-# Compiler flags
-CXXFLAGS = -std=c++11
+# Rule to create symlinks for easy execution
+.PHONY: symlink
+symlink:
+	ln -sf run_bank.sh $(BANK_SYMLINK)
+	ln -sf run_atm.sh $(ATM_SYMLINK)
 
-# MySQL Connector flags (assuming you installed MySQL Connector C++ properly)
-MYSQL_FLAGS = -lmysqlcppconn
-
-# Target executable
-TARGET = bank
-
-# Source files
-SRCS = bank.cpp
-
-# Header files
-HDRS = bank.h
-
-# Object files
-OBJS = $(SRCS:.cpp=.o)
-
-# Rule to build the target executable
-$(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(MYSQL_FLAGS)
-
-# Rule to compile source files into object files
-%.o: %.cpp $(HDRS)
-	$(CXX) $(CXXFLAGS) -c $<
-
-# Clean up build files
+# Clean up symlinks
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(BANK_SYMLINK) $(ATM_SYMLINK)
+
+# Combined rule to create symlinks
+all: symlink
