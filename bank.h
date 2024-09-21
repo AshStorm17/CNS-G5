@@ -11,8 +11,10 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <openssl/ssl.h> // Added for SSL support
-#include <openssl/err.h> // Added for SSL error handling
+#include <openssl/sha.h>
+#include <iomanip>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <sstream>
 #include <fstream>
 #include <cstring>
@@ -21,10 +23,18 @@
 #include <unistd.h>
 #include <iostream>
 
-// Hash the pin using a secure hashing algorithm (e.g., bcrypt)
+// Hash the pin using a secure hashing algorithm
 std::string hashPin(const std::string& pin) {
-    // Replace with actual bcrypt or other secure hash implementation
-    return "hashed_" + pin;
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, pin.c_str(), pin.size());
+    SHA256_Final(hash, &sha256);
+    std::stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
+    return ss.str();
 }
 
 // Authenticate the client by checking account_number and pin from the database
