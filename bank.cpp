@@ -28,6 +28,15 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    std::map<std::string, std::string> auth = loadAuthDetails(authFile);
+    
+    // Check if all necessary fields (host, user, password, database) are present in the auth file
+    if (auth.find("host") == auth.end() || auth.find("user") == auth.end() || 
+        auth.find("password") == auth.end() || auth.find("database") == auth.end()) {
+        std::cerr << "Missing required authentication details in the auth file." << std::endl;
+        return EXIT_FAILURE;
+    }
+    
     // Load authentication details from auth file
     std::map<std::string, std::string> auth = loadAuthDetails(authFile);
 

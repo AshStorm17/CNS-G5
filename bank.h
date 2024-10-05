@@ -310,6 +310,7 @@ void listenForConnections(int port, const std::map<std::string, std::string>& au
             std::cout << "Client connected via SSL." << std::endl;
             sql::Connection *conn = initDatabaseConnection(auth);
             handleClient(clientSocket, ssl, conn);
+            conn->close();
             delete conn;
         }
 
