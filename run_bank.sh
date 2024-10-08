@@ -2,7 +2,7 @@
 
 # Default values
 PORT=8080
-AUTH_FILE="bank.txt"
+AUTH_FILE="bank.auth"
 
 # Parse command-line arguments for port (-p) and auth file (-s)
 while getopts ":p:s:" opt; do

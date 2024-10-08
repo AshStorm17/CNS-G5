@@ -32,7 +32,9 @@ createdb:
 .PHONY: initdb
 initdb: createdb
 	@echo "Initializing the database..."
-	@mysql -u $(DB_USER) -p'$(DB_PASSWORD)' -h $(DB_HOST) -P $(DB_PORT) $(DB_NAME) < $(INIT_DB_SCRIPT)
+	@mysql -u $(DB_USER) -p'$(DB_PASSWORD)' -h $(DB_HOST) -P $(DB_PORT) $(DB_NAME) < $(INIT_DB_SCRIPT) && \
+	echo "Database initialized successfully." || \
+	echo "Failed to initialize the database."
 
 # Rule to drop the database
 .PHONY: dropdb
