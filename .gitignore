@@ -31,11 +31,7 @@
 *.out
 *.app
 
-db_config.txt
-bank.sql
-
-bank.txt
-
+*.txt
 *.key
 *.crt
 
