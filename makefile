@@ -22,11 +22,23 @@ symlink:
 	ln -sf run_bank.sh $(BANK_SYMLINK)
 	ln -sf run_atm.sh $(ATM_SYMLINK)
 
+# Rule to create the database if it doesn't exist
+.PHONY: createdb
+createdb:
+	@echo "Creating the database if it doesn't exist..."
+	@mysql -u $(DB_USER) -p'$(DB_PASSWORD)' -h $(DB_HOST) -P $(DB_PORT) -e "CREATE DATABASE IF NOT EXISTS $(DB_NAME);"
+
 # Rule to initialize the database
 .PHONY: initdb
-initdb:
+initdb: createdb
 	@echo "Initializing the database..."
 	@mysql -u $(DB_USER) -p'$(DB_PASSWORD)' -h $(DB_HOST) -P $(DB_PORT) $(DB_NAME) < $(INIT_DB_SCRIPT)
+
+# Rule to drop the database
+.PHONY: dropdb
+dropdb:
+	@echo "Dropping the database..."
+	@mysql -u $(DB_USER) -p'$(DB_PASSWORD)' -h $(DB_HOST) -P $(DB_PORT) -e "DROP DATABASE IF EXISTS $(DB_NAME);"
 
 # Clean up symlinks
 clean:

@@ -1,4 +1,3 @@
-CREATE DATABASE atm_bank_db;
 USE atm_bank_db;
 
 CREATE TABLE customers (
