@@ -12,10 +12,68 @@
 
 using namespace std;
 
-void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file);
-void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file);
-void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file);
-void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file);
+void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
+void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
+void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
+void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
+
+
+SSL_CTX* InitSSLContext() {
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());  // Create a new SSL context
+    if (!ctx) {
+        cerr << "Unable to create SSL context" << endl;
+        exit(EXIT_FAILURE);
+    }
+
+    // Load client certificates
+    if (!SSL_CTX_load_verify_locations(ctx, "cert.pem", nullptr)) {
+        cerr << "Error loading certificate file" << endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+SSL* ConnectToBank(const string &ip_address, int port, SSL_CTX *ctx) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        cerr << "Could not create socket." << endl;
+        exit(255);
+    }
+
+    sockaddr_in server;
+    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
+    server.sin_family = AF_INET;
+    server.sin_port = htons(port);
+
+    // Connect to the bank server
+    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        cerr << "Connection failed." << endl;
+        close(sock);
+        exit(255);
+    }
+
+    // Create an SSL object for the socket
+    SSL *ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sock);
+
+    // Perform SSL handshake
+    if (SSL_connect(ssl) <= 0) {
+        cerr << "SSL connection failed" << endl;
+        close(sock);
+        SSL_free(ssl);
+        exit(255);
+    }
+
+    return ssl;
+}
+
+void CloseSSLConnection(SSL *ssl) {
+    int sock = SSL_get_fd(ssl);
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(sock);
+}
 
 int main(int argc, char *argv[]) {
     string account;
@@ -51,20 +109,27 @@ int main(int argc, char *argv[]) {
         card_file = account + ".card";
     }
 
+    // Initialize SSL context
+    SSL_CTX *ctx = InitSSLContext();
+
     // Execute operations
-    if (create_new) create_account(account, amount, auth_file, ip_address, port, card_file);
-    else if (deposit_money) deposit(account, amount, auth_file, ip_address, port, card_file);
-    else if (withdraw_money) withdraw(account, amount, auth_file, ip_address, port, card_file);
-    else if (get_balance_flag) get_balance(account, auth_file, ip_address, port, card_file);
+    if (create_new) create_account(account, amount, auth_file, ip_address, port, card_file, ctx);
+    else if (deposit_money) deposit(account, amount, auth_file, ip_address, port, card_file, ctx);
+    else if (withdraw_money) withdraw(account, amount, auth_file, ip_address, port, card_file, ctx);
+    else if (get_balance_flag) get_balance(account, auth_file, ip_address, port, card_file, ctx);
     else {
         cerr << "Invalid operation. Exiting." << endl;
         return 255;
     }
 
     return 0;
+
+    // Cleanup SSL context
+    SSL_CTX_free(ctx);
+    return 0;
 }
 
-void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file) {
+void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
     if (balance < 10.00) {
         cerr << "Initial balance must be at least 10.00." << endl;
         exit(255);
@@ -93,24 +158,7 @@ void create_account(const string &account, float balance, const string &auth_fil
         exit(255);
     }
 
-    // // Establish a TCP connection to the bank server
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1) {
-        cerr << "Could not create socket." << endl;
-        exit(255);
-    }
-
-    sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
-
-    // Connect to the bank server
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        cerr << "Connection failed." << endl;
-        close(sock);
-        exit(255);
-    }
+    SSL *ssl = ConnectToBank(ip_address, port, ctx);
 
     // Create JSON message for account creation
     Json::Value request;
@@ -122,42 +170,27 @@ void create_account(const string &account, float balance, const string &auth_fil
     Json::StreamWriterBuilder writer;
     string request_str = Json::writeString(writer, request);
 
-    // Send message to server
-    send(sock, request_str.c_str(), request_str.length(), 0);
+    // Send message to server using SSL
+    SSL_write(ssl, request_str.c_str(), request_str.length());
 
     // Receive response
     char response[2000];
-    int read_size = recv(sock, response, 2000, 0);
+    int read_size = SSL_read(ssl, response, 2000);
     if (read_size > 0) {
         cout << string(response, read_size) << endl;
     }
 
-    close(sock);
+    CloseSSLConnection(ssl);
 }
 
-void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file) {
+void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
     if (amount <= 0) {
         cerr << "Deposit amount must be greater than 0." << endl;
         exit(255);
     }
 
-    // Establish TCP connection
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1) {
-        cerr << "Could not create socket." << endl;
-        exit(255);
-    }
-
-    sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
-
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        cerr << "Connection failed." << endl;
-        close(sock);
-        exit(255);
-    }
+    
+    SSL *ssl = ConnectToBank(ip_address, port, ctx);
 
     // Create JSON message for deposit
     Json::Value request;
@@ -170,42 +203,26 @@ void deposit(const string &account, float amount, const string &auth_file, const
     Json::StreamWriterBuilder writer;
     string request_str = Json::writeString(writer, request);
 
-    // Send message to server
-    send(sock, request_str.c_str(), request_str.length(), 0);
+    // Send message to server using SSL
+    SSL_write(ssl, request_str.c_str(), request_str.length());
 
     // Receive response
     char response[2000];
-    int read_size = recv(sock, response, 2000, 0);
+    int read_size = SSL_read(ssl, response, 2000);
     if (read_size > 0) {
         cout << string(response, read_size) << endl;
     }
 
-    close(sock);
+    CloseSSLConnection(ssl);
 }
 
-void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file) {
+void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
     if (amount <= 0) {
         cerr << "Withdraw amount must be greater than 0." << endl;
         exit(255);
     }
 
-    // Establish TCP connection
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1) {
-        cerr << "Could not create socket." << endl;
-        exit(255);
-    }
-
-    sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
-
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        cerr << "Connection failed." << endl;
-        close(sock);
-        exit(255);
-    }
+    SSL *ssl = ConnectToBank(ip_address, port, ctx);
 
     // Create JSON message for withdrawal
     Json::Value request;
@@ -218,37 +235,21 @@ void withdraw(const string &account, float amount, const string &auth_file, cons
     Json::StreamWriterBuilder writer;
     string request_str = Json::writeString(writer, request);
 
-    // Send message to server
-    send(sock, request_str.c_str(), request_str.length(), 0);
+    // Send message to server using SSL
+    SSL_write(ssl, request_str.c_str(), request_str.length());
 
     // Receive response
     char response[2000];
-    int read_size = recv(sock, response, 2000, 0);
+    int read_size = SSL_read(ssl, response, 2000);
     if (read_size > 0) {
         cout << string(response, read_size) << endl;
     }
 
-    close(sock);
+    CloseSSLConnection(ssl);
 }
 
-void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file) {
-    // Establish TCP connection
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1) {
-        cerr << "Could not create socket." << endl;
-        exit(255);
-    }
-
-    sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
-
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        cerr << "Connection failed." << endl;
-        close(sock);
-        exit(255);
-    }
+void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
+    SSL *ssl = ConnectToBank(ip_address, port, ctx);
 
     // Create JSON message for balance inquiry
     Json::Value request;
@@ -260,15 +261,15 @@ void get_balance(const string &account, const string &auth_file, const string &i
     Json::StreamWriterBuilder writer;
     string request_str = Json::writeString(writer, request);
 
-    // Send message to server
-    send(sock, request_str.c_str(), request_str.length(), 0);
+    // Send message to server using SSL
+    SSL_write(ssl, request_str.c_str(), request_str.length());
 
     // Receive response
     char response[2000];
-    int read_size = recv(sock, response, 2000, 0);
+    int read_size = SSL_read(ssl, response, 2000);
     if (read_size > 0) {
         cout << string(response, read_size) << endl;
     }
 
-    close(sock);
+    CloseSSLConnection(ssl);
 }
