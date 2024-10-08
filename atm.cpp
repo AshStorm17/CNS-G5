@@ -1,275 +1,265 @@
 #include <iostream>
-#include <cstring>
+#include <fstream>
+#include <map>
+#include <string>
+#include <sstream>
 #include <cstdlib>
-#include <sys/socket.h>
-#include <arpa/inet.h>
+#include <cstring>
 #include <unistd.h>
-#include <jsoncpp/json/json.h>  // JSON library
-#include <fstream> // Add this include for file handling
-#include <random>  // Include for random number generation
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <jsoncpp/json/json.h> // Make sure you have the JSON library available
+#include <cppconn/driver.h>
+#include <cppconn/connection.h>
+#include <cppconn/statement.h>
+#include <cppconn/prepared_statement.h>
+#include <cppconn/resultset.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <openssl/evp.h>
+#include <iomanip>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-using namespace std;
+SSL_CTX* initClientSSLContext() {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    const SSL_METHOD* method = TLS_client_method();  // Use TLS method for client
+    SSL_CTX* ctx = SSL_CTX_new(method);
 
-void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
-void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
-void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
-void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx);
-
-
-SSL_CTX* InitSSLContext() {
-    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());  // Create a new SSL context
     if (!ctx) {
-        cerr << "Unable to create SSL context" << endl;
-        exit(EXIT_FAILURE);
-    }
-
-    // Load client certificates
-    if (!SSL_CTX_load_verify_locations(ctx, "cert.pem", nullptr)) {
-        cerr << "Error loading certificate file" << endl;
+        std::cerr << "Unable to create SSL context" << std::endl;
+        ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
     return ctx;
 }
 
-SSL* ConnectToBank(const string &ip_address, int port, SSL_CTX *ctx) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1) {
-        cerr << "Could not create socket." << endl;
-        exit(255);
+// Function to load authentication details from a file
+std::map<std::string, std::string> loadAuthDetails(const std::string &filename) {
+    std::ifstream file(filename);
+    std::map<std::string, std::string> auth;
+    std::string key, value;
+
+    while (file >> key >> value) {
+        auth[key] = value;
     }
 
-    sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(ip_address.c_str());
-    server.sin_family = AF_INET;
-    server.sin_port = htons(port);
+    return auth;
+}
+
+bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response) {
+    if (SSL_write(ssl, request.c_str(), request.size()) <= 0) {
+        std::cerr << "Error sending request to the bank server." << std::endl;
+        return false;
+    }
+
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+
+    int bytesReceived = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+    if (bytesReceived <= 0) {
+        std::cerr << "Error receiving response from the bank server." << std::endl;
+        return false;
+    }
+
+    response = std::string(buffer, bytesReceived);
+    return true;
+}
+
+
+// Function to send a request to the bank server and receive a response
+bool sendRequest(int sockfd, const std::string &request, std::string &response) {
+    if (send(sockfd, request.c_str(), request.size(), 0) < 0) {
+        std::cerr << "Error sending request to the bank server." << std::endl;
+        return false;
+    }
+    
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    
+    int bytesReceived = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (bytesReceived < 0) {
+        std::cerr << "Error receiving response from the bank server." << std::endl;
+        return false;
+    }
+
+    response = std::string(buffer, bytesReceived);
+    return true;
+}
+
+// Function to generate a random 4-digit PIN code
+int generateRandomPin() {
+    return rand() % 9000 + 1000; // Generates a 4-digit PIN code
+}
+
+// Main function for the ATM application
+int main(int argc, char *argv[]) {
+    std::string authFile = "bank.auth";
+    std::string ipAddress = "127.0.0.1";
+    int port = 3000;
+    std::string cardFile;
+    std::string account;
+    std::string mode;
+    std::string balance;
+
+    int opt;
+    while ((opt = getopt(argc, argv, "s:i:p:c:a:n:d:w:g:")) != -1) {
+        switch (opt) {
+            case 's':
+                authFile = optarg;
+                break;
+            case 'i':
+                ipAddress = optarg;
+                break;
+            case 'p':
+                port = std::stoi(optarg);
+                break;
+            case 'c':
+                cardFile = optarg;
+                break;
+            case 'a':
+                account = optarg;
+                break;
+            case 'n':
+                mode = "CREATE";
+                balance = optarg;
+                break;
+            case 'd':
+                mode = "DEPOSIT";
+                balance = optarg;
+                break;
+            case 'w':
+                mode = "WITHDRAW";
+                balance = optarg;
+                break;
+            case 'g':
+                mode = "GET_BALANCE";
+                break;
+            default:
+                std::cerr << "Invalid command line option." << std::endl;
+                return 255;
+        }
+    }
+
+    // Validate required parameters
+    if (account.empty() || (mode.empty() && !balance.empty()) || (mode != "GET_BALANCE" && balance.empty())) {
+        std::cerr << "Account and operation parameters are required." << std::endl;
+        return 255;
+    }
+
+    // Load authentication details
+    std::map<std::string, std::string> auth = loadAuthDetails(authFile);
+    if (auth.empty()) {
+        std::cerr << "Failed to load authentication details." << std::endl;
+        return 255;
+    }
+
+    // Create socket
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        std::cerr << "Error creating socket." << std::endl;
+        return 255;
+    }
+
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ipAddress.c_str(), &serverAddr.sin_addr) <= 0) {
+        std::cerr << "Invalid IP address." << std::endl;
+        close(sockfd);
+        return 255;
+    }
 
     // Connect to the bank server
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        cerr << "Connection failed." << endl;
-        close(sock);
-        exit(255);
+    if (connect(sockfd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+        std::cerr << "Error connecting to the bank server." << std::endl;
+        close(sockfd);
+        return 255;
     }
 
-    // Create an SSL object for the socket
-    SSL *ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, sock);
+
+    // Initialize SSL
+    SSL_CTX* ctx = initClientSSLContext();
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sockfd);
 
     // Perform SSL handshake
     if (SSL_connect(ssl) <= 0) {
-        cerr << "SSL connection failed" << endl;
-        close(sock);
+        std::cerr << "Error during SSL handshake." << std::endl;
+        ERR_print_errors_fp(stderr);
+        close(sockfd);
         SSL_free(ssl);
-        exit(255);
-    }
-
-    return ssl;
-}
-
-void CloseSSLConnection(SSL *ssl) {
-    int sock = SSL_get_fd(ssl);
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
-    close(sock);
-}
-
-int main(int argc, char *argv[]) {
-    string account;
-    string auth_file = "bank.auth";
-    string ip_address = "127.0.1.1";
-    int port = 8080;
-    string card_file;
-    float amount = 0;
-    bool create_new = false, deposit_money = false, withdraw_money = false, get_balance_flag = false;
-    
-    // Parse command line arguments
-    for (int i = 1; i < argc; i++) {
-        string arg = argv[i];
-        if (arg == "-a") account = argv[++i];
-        else if (arg == "-s") auth_file = argv[++i];
-        else if (arg == "-i") ip_address = argv[++i];
-        else if (arg == "-p") port = atoi(argv[++i]);
-        else if (arg == "-c") card_file = argv[++i];
-        else if (arg == "-n") { create_new = true; amount = atof(argv[++i]); }
-        else if (arg == "-d") { deposit_money = true; amount = atof(argv[++i]); }
-        else if (arg == "-w") { withdraw_money = true; amount = atof(argv[++i]); }
-        else if (arg == "-g") get_balance_flag = true;
-    }
-
-    // Validate account name
-    if (account.empty()) {
-        cerr << "Account is required." << endl;
+        SSL_CTX_free(ctx);
         return 255;
     }
 
-    // Default card file
-    if (card_file.empty()) {
-        card_file = account + ".card";
+    std::cout << "Connected with " << SSL_get_cipher(ssl) << " encryption" << std::endl;
+
+
+    // Determine the operation based on mode
+    std::string response;
+    if (mode == "CREATE") {
+        // Check if card file exists
+        std::ifstream cardFileCheck(cardFile);
+        if (cardFileCheck.good()) {
+            std::cerr << "Card file already exists. Account creation failed." << std::endl;
+            close(sockfd);
+            return 255;
+        }
+
+        // Create JSON request for creating an account
+        Json::Value jsonRequest;
+        jsonRequest["operation"] = "CREATE";
+        jsonRequest["account"] = account;
+        jsonRequest["initial_balance"] = std::stod(balance);
+        std::string requestStr = jsonRequest.toStyledString();
+
+        // Send request to bank
+        if (sendSSLRequest(ssl, requestStr, response)) {
+            std::cout << response << std::endl;
+        }
+
+        // Create the card file with a random PIN code
+        std::ofstream newCardFile(cardFile);
+        if (newCardFile) {
+            int pin_code = generateRandomPin();
+            newCardFile << pin_code;
+            newCardFile.close();
+            std::cout << "Card file created with PIN: " << pin_code << std::endl;
+        } else {
+            std::cerr << "Error creating card file." << std::endl;
+        }
+
+    } else if (mode == "DEPOSIT" || mode == "WITHDRAW") {
+        // Create JSON request for depositing or withdrawing money
+        Json::Value jsonRequest;
+        jsonRequest["operation"] = mode;
+        jsonRequest["account"] = account;
+        jsonRequest["amount"] = std::stod(balance);
+        std::string requestStr = jsonRequest.toStyledString();
+
+        // Send request to bank
+        if (sendSSLRequest(ssl, requestStr, response)) {
+            std::cout << response << std::endl;
+        }
+
+    } else if (mode == "GET_BALANCE") {
+        // Create JSON request for getting balance
+        Json::Value jsonRequest;
+        jsonRequest["operation"] = "GET_BALANCE";
+        jsonRequest["account"] = account;
+        std::string requestStr = jsonRequest.toStyledString();
+
+        // Send request to bank
+        if (sendSSLRequest(ssl, requestStr, response)) {
+            std::cout << response << std::endl;
+        }
     }
 
-    // Initialize SSL context
-    SSL_CTX *ctx = InitSSLContext();
-
-    // Execute operations
-    if (create_new) create_account(account, amount, auth_file, ip_address, port, card_file, ctx);
-    else if (deposit_money) deposit(account, amount, auth_file, ip_address, port, card_file, ctx);
-    else if (withdraw_money) withdraw(account, amount, auth_file, ip_address, port, card_file, ctx);
-    else if (get_balance_flag) get_balance(account, auth_file, ip_address, port, card_file, ctx);
-    else {
-        cerr << "Invalid operation. Exiting." << endl;
-        return 255;
-    }
-
+    // Cleanup
+    close(sockfd);
     return 0;
-
-    // Cleanup SSL context
-    SSL_CTX_free(ctx);
-    return 0;
-}
-
-void create_account(const string &account, float balance, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
-    if (balance < 10.00) {
-        cerr << "Initial balance must be at least 10.00." << endl;
-        exit(255);
-    }
-
-    // Generate a random 16-digit PIN
-    string pin;
-    random_device rd; // Obtain a random number from hardware
-    mt19937 eng(rd()); // Seed the generator
-    uniform_int_distribution<> distr(1000, 9999); // Define the range
-
-    for (int i = 0; i < 4; ++i) {
-        pin += to_string(distr(eng)); // Generate 4 groups of 4 digits
-    }
-
-    // Remove the last character to avoid an extra digit
-    pin.pop_back();
-
-    // Write the PIN to the card file
-    ofstream card_file_stream(card_file);
-    if (card_file_stream) {
-        card_file_stream << "PIN: " << pin << endl;
-        card_file_stream.close();
-    } else {
-        cerr << "Error writing to card file." << endl;
-        exit(255);
-    }
-
-    SSL *ssl = ConnectToBank(ip_address, port, ctx);
-
-    // Create JSON message for account creation
-    Json::Value request;
-    request["command"] = "create";
-    request["account"] = account;
-    request["initial_balance"] = balance;
-    request["auth_file"] = auth_file;
-
-    Json::StreamWriterBuilder writer;
-    string request_str = Json::writeString(writer, request);
-
-    // Send message to server using SSL
-    SSL_write(ssl, request_str.c_str(), request_str.length());
-
-    // Receive response
-    char response[2000];
-    int read_size = SSL_read(ssl, response, 2000);
-    if (read_size > 0) {
-        cout << string(response, read_size) << endl;
-    }
-
-    CloseSSLConnection(ssl);
-}
-
-void deposit(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
-    if (amount <= 0) {
-        cerr << "Deposit amount must be greater than 0." << endl;
-        exit(255);
-    }
-
-    
-    SSL *ssl = ConnectToBank(ip_address, port, ctx);
-
-    // Create JSON message for deposit
-    Json::Value request;
-    request["command"] = "deposit";
-    request["account"] = account;
-    request["amount"] = amount;
-    request["auth_file"] = auth_file;
-    request["card_file"] = card_file;
-
-    Json::StreamWriterBuilder writer;
-    string request_str = Json::writeString(writer, request);
-
-    // Send message to server using SSL
-    SSL_write(ssl, request_str.c_str(), request_str.length());
-
-    // Receive response
-    char response[2000];
-    int read_size = SSL_read(ssl, response, 2000);
-    if (read_size > 0) {
-        cout << string(response, read_size) << endl;
-    }
-
-    CloseSSLConnection(ssl);
-}
-
-void withdraw(const string &account, float amount, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
-    if (amount <= 0) {
-        cerr << "Withdraw amount must be greater than 0." << endl;
-        exit(255);
-    }
-
-    SSL *ssl = ConnectToBank(ip_address, port, ctx);
-
-    // Create JSON message for withdrawal
-    Json::Value request;
-    request["command"] = "withdraw";
-    request["account"] = account;
-    request["amount"] = amount;
-    request["auth_file"] = auth_file;
-    request["card_file"] = card_file;
-
-    Json::StreamWriterBuilder writer;
-    string request_str = Json::writeString(writer, request);
-
-    // Send message to server using SSL
-    SSL_write(ssl, request_str.c_str(), request_str.length());
-
-    // Receive response
-    char response[2000];
-    int read_size = SSL_read(ssl, response, 2000);
-    if (read_size > 0) {
-        cout << string(response, read_size) << endl;
-    }
-
-    CloseSSLConnection(ssl);
-}
-
-void get_balance(const string &account, const string &auth_file, const string &ip_address, int port, const string &card_file, SSL_CTX *ctx) {
-    SSL *ssl = ConnectToBank(ip_address, port, ctx);
-
-    // Create JSON message for balance inquiry
-    Json::Value request;
-    request["command"] = "balance";
-    request["account"] = account;
-    request["auth_file"] = auth_file;
-    request["card_file"] = card_file;
-
-    Json::StreamWriterBuilder writer;
-    string request_str = Json::writeString(writer, request);
-
-    // Send message to server using SSL
-    SSL_write(ssl, request_str.c_str(), request_str.length());
-
-    // Receive response
-    char response[2000];
-    int read_size = SSL_read(ssl, response, 2000);
-    if (read_size > 0) {
-        cout << string(response, read_size) << endl;
-    }
-
-    CloseSSLConnection(ssl);
 }
