@@ -246,7 +246,7 @@ sql::Connection* initDatabaseConnection(const std::map<std::string, std::string>
 SSL_CTX* initSSLContext() {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
-    const SSL_METHOD *method = SSLv23_server_method();
+    const SSL_METHOD *method = TLS_server_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
 
     if (!ctx) {
