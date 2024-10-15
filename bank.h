@@ -22,6 +22,9 @@
 #include <string>
 #include <unistd.h>
 #include <iostream>
+#include <mutex>
+
+std::mutex db_mutex;
 
 // Hash the pin using a secure hashing algorithm
 std::string hashPin(const std::string& pin) {
@@ -47,6 +50,7 @@ std::string hashPin(const std::string& pin) {
 
 // Authenticate the client by checking account_number and pin from the database
 bool authenticateClient(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
+    std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
     bool authenticated = false;
@@ -70,6 +74,7 @@ bool authenticateClient(const std::string& account_number, const std::string& pi
 
 // Function to create a new account
 bool createAccount(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
+    std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     bool success = false;
 
@@ -94,6 +99,7 @@ bool createAccount(const std::string& account_number, const std::string& pin, sq
 
 // Function to delete an account
 bool deleteAccount(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
+    std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     bool success = false;
 
@@ -116,6 +122,7 @@ bool deleteAccount(const std::string& account_number, const std::string& pin, sq
 
 // Function to view account details
 void viewAccountDetails(const std::string& account_number, sql::Connection *conn, SSL *ssl) {
+    std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
 
@@ -137,7 +144,8 @@ void viewAccountDetails(const std::string& account_number, sql::Connection *conn
 }
 
 // Function to modify account details (e.g., update balance) with PIN authentication
-bool modifyAccountDetails(const std::string& account_number, const std::string& pin, const std::string& new_balance, sql::Connection *conn) {
+bool depositAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn) {
+    std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
     bool authenticated = false;
@@ -159,8 +167,25 @@ bool modifyAccountDetails(const std::string& account_number, const std::string& 
 
     // If authenticated, proceed to modify the balance
     if (authenticated) {
+        // Retrieve the current balance from the database
+        pstmt = conn->prepareStatement("SELECT balance FROM customers WHERE account_number = ?");
+        pstmt->setString(1, account_number);
+        res = pstmt->executeQuery();
+
+        double old_balance = 0.0;
+        if (res->next()) {
+            old_balance = res->getDouble("balance");  // Retrieve the current balance
+        }
+
+        delete res;
+        delete pstmt;
+
+        // Convert new_balance to double and add it to the old balance
+        double transac_double = std::stod(transac);  // Convert new_balance to double
+        double updated_balance = old_balance + transac_double;  // Add the old and new balance
+
         pstmt = conn->prepareStatement("UPDATE customers SET balance = ? WHERE account_number = ?");
-        pstmt->setString(1, new_balance);
+        pstmt->setString(1, transac);
         pstmt->setString(2, account_number);
 
         try {
@@ -176,6 +201,72 @@ bool modifyAccountDetails(const std::string& account_number, const std::string& 
     return false; // Modification failed or not authenticated
 }
 
+// Function to withdraw from account with PIN authentication
+bool withdrawAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn) {
+    std::lock_guard<std::mutex> lock(db_mutex);
+    sql::PreparedStatement *pstmt;
+    sql::ResultSet *res;
+    bool authenticated = false;
+
+    std::string hashed_pin = hashPin(pin);
+
+    // First, authenticate the user
+    pstmt = conn->prepareStatement("SELECT * FROM customers WHERE account_number = ? AND pin = ?");
+    pstmt->setString(1, account_number);
+    pstmt->setString(2, hashed_pin);
+    res = pstmt->executeQuery();
+
+    if (res->next()) {
+        authenticated = true;
+    }
+
+    delete res;
+    delete pstmt;
+
+    // If authenticated, proceed to withdraw the amount
+    if (authenticated) {
+        // Retrieve the current balance from the database
+        pstmt = conn->prepareStatement("SELECT balance FROM customers WHERE account_number = ?");
+        pstmt->setString(1, account_number);
+        res = pstmt->executeQuery();
+
+        double old_balance = 0.0;
+        if (res->next()) {
+            old_balance = res->getDouble("balance");  // Retrieve the current balance
+        }
+
+        delete res;
+        delete pstmt;
+
+        // Convert the withdrawal amount to double
+        double transac_double = std::stod(transac);  // Convert the transaction amount to double
+
+        // Check if there is enough balance for the withdrawal
+        if (old_balance >= transac_double) {
+            double updated_balance = old_balance - transac_double;  // Deduct the withdrawal amount
+
+            // Update the balance in the database
+            pstmt = conn->prepareStatement("UPDATE customers SET balance = ? WHERE account_number = ?");
+            pstmt->setDouble(1, updated_balance);  // Set the updated balance
+            pstmt->setString(2, account_number);
+
+            try {
+                pstmt->executeUpdate();
+                delete pstmt;  // Clean up after execution
+                return true;  // Withdrawal successful
+            } catch (sql::SQLException &e) {
+                std::cerr << "Error modifying account details: " << e.what() << std::endl;
+            }
+        } else {
+            std::cerr << "Error: Insufficient funds. Cannot withdraw more than the current balance." << std::endl;
+        }
+    }
+
+    delete pstmt;  // Clean up if not authenticated or if error occurred
+    return false;  // Withdrawal failed or not authenticated
+}
+
+
 // Updated handleClient to authenticate PIN for modify command
 void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
     char buffer[1024];
@@ -189,7 +280,7 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
 
     std::string request(buffer);
     std::istringstream iss(request);
-    std::string command, account_number, pin, new_balance;
+    std::string command, account_number, pin, transac;
 
     iss >> command;
 
@@ -210,9 +301,16 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
     } else if (command == "VIEW") {
         iss >> account_number;
         viewAccountDetails(account_number, conn, ssl);
-    } else if (command == "MODIFY") {
-        iss >> account_number >> pin >> new_balance;
-        if (modifyAccountDetails(account_number, pin, new_balance, conn)) {
+    } else if (command == "DEPOSIT") {
+        iss >> account_number >> pin >> transac;
+        if (depositAccountDetails(account_number, pin, transac, conn)) {
+            SSL_write(ssl, "Account modification successful\n", 34);
+        } else {
+            SSL_write(ssl, "Account modification failed or authentication required\n", 56);
+        }
+    } else if (command == "WITHDRAW") {
+        iss >> account_number >> pin >> transac;
+        if (withdrawAccountDetails(account_number, pin, transac, conn)) {
             SSL_write(ssl, "Account modification successful\n", 34);
         } else {
             SSL_write(ssl, "Account modification failed or authentication required\n", 56);
