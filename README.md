@@ -18,5 +18,5 @@ The project involves developing two main components: an ATM client (atm) and a B
 | Aryan Sahu       | 22110038    |
 | Aayush Parmar    | 22110181    |
 | Mrugank Patil    | 22110158    |
-| Arjun Sekar      | 22110       |
+| Arjun Sekar      | 22110034    |
 | Pratyaksh Bhayre | 22110       |
