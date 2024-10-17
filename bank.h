@@ -183,6 +183,11 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
 
         // Convert new_balance to double and add it to the old balance
         double transac_double = std::stod(transac);  // Convert new_balance to double
+        if(transac_double <= 0){
+            std::cerr << "Invalid tranaction amount recieved." << std::endl;
+            return false;
+        }
+
         double updated_balance = old_balance + transac_double;  // Add the old and new balance
 
         pstmt = conn->prepareStatement("UPDATE customers SET balance = ? WHERE account_number = ?");
@@ -196,9 +201,9 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
         } catch (sql::SQLException &e) {
             std::cerr << "Error modifying account details: " << e.what() << std::endl;
         }
-    }
 
-    delete pstmt; // Clean up if not authenticated or if error occurred
+        delete pstmt; // Clean up if not authenticated or if error occurred
+    }
     return false; // Modification failed or not authenticated
 }
 
@@ -242,6 +247,11 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
         // Convert the withdrawal amount to double
         double transac_double = std::stod(transac);  // Convert the transaction amount to double
 
+        if(transac_double <= 0){
+            std::cerr << "Invalid tranaction amount recieved." << std::endl;
+            return false;
+        }
+
         // Check if there is enough balance for the withdrawal
         if (old_balance >= transac_double) {
             double updated_balance = old_balance - transac_double;  // Deduct the withdrawal amount
@@ -262,8 +272,6 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
             std::cerr << "Error: Insufficient funds. Cannot withdraw more than the current balance." << std::endl;
         }
     }
-
-    delete pstmt;  // Clean up if not authenticated or if error occurred
     return false;  // Withdrawal failed or not authenticated
 }
 
@@ -300,7 +308,8 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
     std::string account_number = jsonRequest["account"].asString();
     std::string pin = "1010";
     if (command == "CREATE") {
-        if (createAccount(account_number, pin, conn)) {
+        std::string initial_balance = jsonRequest["initial_balance"].asString();
+        if (createAccount(account_number, pin, conn, initial_balance)) {
             SSL_write(ssl, "Account creation successful\n", 30);
         } else {
             SSL_write(ssl, "Account creation failed\n", 24);
@@ -311,7 +320,7 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
         } else {
             SSL_write(ssl, "Account deletion failed\n", 24);
         }
-    } else if (command == "VIEW") {
+    } else if (command == "GET_BALANCE") {
         viewAccountDetails(account_number, conn, ssl);
     } else if (command == "DEPOSIT") {
         std::string transac = jsonRequest["amount"].asString();
