@@ -23,7 +23,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <mutex>
-
+#include <jsoncpp/json/json.h>
 std::mutex db_mutex;
 
 // Hash the pin using a secure hashing algorithm
@@ -73,7 +73,7 @@ bool authenticateClient(const std::string& account_number, const std::string& pi
 }
 
 // Function to create a new account
-bool createAccount(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
+bool createAccount(const std::string& account_number, const std::string& pin, sql::Connection *conn, const std::string& initial_deposit = "0") {
     std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     bool success = false;
@@ -82,9 +82,10 @@ bool createAccount(const std::string& account_number, const std::string& pin, sq
     std::string hashed_pin = hashPin(pin);
 
     // Prepare and execute SQL statement
-    pstmt = conn->prepareStatement("INSERT INTO customers (account_number, pin) VALUES (?, ?)");
+    pstmt = conn->prepareStatement("INSERT INTO customers (account_number, pin, balance) VALUES (?, ?, ?)");
     pstmt->setString(1, account_number);
     pstmt->setString(2, hashed_pin);
+    pstmt->setString(3, initial_deposit);
 
     try {
         pstmt->executeUpdate();
@@ -185,7 +186,7 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
         double updated_balance = old_balance + transac_double;  // Add the old and new balance
 
         pstmt = conn->prepareStatement("UPDATE customers SET balance = ? WHERE account_number = ?");
-        pstmt->setString(1, transac);
+        pstmt->setString(1, std::to_string(updated_balance));
         pstmt->setString(2, account_number);
 
         try {
@@ -272,44 +273,55 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
     char buffer[1024];
     bzero(buffer, sizeof(buffer));
 
+    // Read the request from the client (ATM)
     int bytes = SSL_read(ssl, buffer, sizeof(buffer));
     if (bytes <= 0) {
-        SSL_write(ssl, "Error recieving data!\n", 22);
+        SSL_write(ssl, "Error receiving data!\n", 22);
         return;
     }
 
+    // Parse the received JSON request
     std::string request(buffer);
+    Json::Value jsonRequest;
+    Json::CharReaderBuilder reader;
+    std::string errors;
+
+    // Create an input stream from the request string
     std::istringstream iss(request);
-    std::string command, account_number, pin, transac;
 
-    iss >> command;
+    // Now pass the lvalue (iss) to parseFromStream
+    if (!Json::parseFromStream(reader, iss, &jsonRequest, &errors)) {
+        SSL_write(ssl, "Invalid JSON format\n", 20);
+        return;
+    }
 
+    // Extract the operation from the JSON request
+    std::string command = jsonRequest["operation"].asString();
+    std::string account_number = jsonRequest["account"].asString();
+    std::string pin = "1010";
     if (command == "CREATE") {
-        iss >> account_number >> pin;
         if (createAccount(account_number, pin, conn)) {
             SSL_write(ssl, "Account creation successful\n", 30);
         } else {
             SSL_write(ssl, "Account creation failed\n", 24);
         }
     } else if (command == "DELETE") {
-        iss >> account_number >> pin;
         if (deleteAccount(account_number, pin, conn)) {
             SSL_write(ssl, "Account deletion successful\n", 30);
         } else {
             SSL_write(ssl, "Account deletion failed\n", 24);
         }
     } else if (command == "VIEW") {
-        iss >> account_number;
         viewAccountDetails(account_number, conn, ssl);
     } else if (command == "DEPOSIT") {
-        iss >> account_number >> pin >> transac;
+        std::string transac = jsonRequest["amount"].asString();
         if (depositAccountDetails(account_number, pin, transac, conn)) {
             SSL_write(ssl, "Account modification successful\n", 34);
         } else {
             SSL_write(ssl, "Account modification failed or authentication required\n", 56);
         }
     } else if (command == "WITHDRAW") {
-        iss >> account_number >> pin >> transac;
+        std::string transac = jsonRequest["amount"].asString();
         if (withdrawAccountDetails(account_number, pin, transac, conn)) {
             SSL_write(ssl, "Account modification successful\n", 34);
         } else {
