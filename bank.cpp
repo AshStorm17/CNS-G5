@@ -36,9 +36,6 @@ int main(int argc, char *argv[]) {
         std::cerr << "Missing required authentication details in the auth file." << std::endl;
         return EXIT_FAILURE;
     }
-    
-    // Load authentication details from auth file
-    std::map<std::string, std::string> auth = loadAuthDetails(authFile);
 
     // Initialize SSL context
     SSL_CTX *ctx = initSSLContext();
