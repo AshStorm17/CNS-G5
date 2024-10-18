@@ -48,6 +48,38 @@ std::string hashPin(const std::string& pin) {
     return ss.str();
 }
 
+std::string decryptMessage(const std::string& ciphertext, const unsigned char* key, const unsigned char* iv) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    int len;
+    int plaintext_len;
+    std::string plaintext;
+
+    if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+        std::cerr << "Error initializing decryption context" << std::endl;
+        return "";
+    }
+
+    plaintext.resize(ciphertext.size());
+    if (!EVP_DecryptUpdate(ctx, (unsigned char*)&plaintext[0], &len, (const unsigned char*)ciphertext.c_str(), ciphertext.size())) {
+        std::cerr << "Error decrypting ciphertext" << std::endl;
+        return "";
+    }
+
+    plaintext_len = len;
+
+    if (!EVP_DecryptFinal_ex(ctx, (unsigned char*)&plaintext[plaintext_len], &len)) {
+        std::cerr << "Error finalizing decryption" << std::endl;
+        return "";
+    }
+
+    plaintext_len += len;
+    plaintext.resize(plaintext_len);
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    return plaintext;
+}
+
 // Authenticate the client by checking account_number and pin from the database
 bool authenticateClient(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
     std::lock_guard<std::mutex> lock(db_mutex);
@@ -288,7 +320,17 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
         return;
     }
 
+    // Extract the IV from the beginning of the received message
     // Decrypt recieved request using auth file as key. Decrypted message is a json stylised string.
+    unsigned char iv[AES_BLOCK_SIZE];
+    memcpy(iv, buffer, AES_BLOCK_SIZE);
+
+    // Decrypt the received message using the symmetric key and IV
+    std::string encryptedMessage(buffer + AES_BLOCK_SIZE, bytes - AES_BLOCK_SIZE);
+    unsigned char key[KEY_LENGTH / 8];
+    std::stringstream(auth_key) >> std::hex >> std::setw(KEY_LENGTH / 4) >> std::setfill('0');
+    std::copy(auth_key.begin(), auth_key.end(), key);
+    std::string request = decryptMessage(encryptedMessage, key, iv);
     
 
     // Parse the received JSON request
