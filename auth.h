@@ -10,7 +10,7 @@
 #include <openssl/err.h>
 #include <unistd.h>
 
-#define KEY_LENGTH 256 // 256-bit key for symmetric encryption
+#define KEY_LENGTH 32 // 32 Byte key => 256-bit key for symmetric encryption
 
 // Function to check if the file exists
 bool fileExists(const std::string& filename) {
