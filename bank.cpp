@@ -1,11 +1,13 @@
 #include "bank.h"
+#include "auth.h"
 #include <iostream>
 #include <map>
 #include <string>
 
 int main(int argc, char *argv[]) {
     int opt;
-    std::string authFile;
+    std::string authFilename;
+    std::string auth_key;
     int port = 0;
 
     // Parse command-line options using getopt
@@ -15,7 +17,7 @@ int main(int argc, char *argv[]) {
                 port = std::stoi(optarg); // Get the port from the -p flag
                 break;
             case 's':
-                authFile = optarg; // Get the auth file from the -s flag
+                authFilename = optarg; // Get the auth file from the -s flag
                 break;
             default:
                 std::cerr << "Usage: " << argv[0] << " -p <port> -s <auth_file>" << std::endl;
@@ -23,16 +25,29 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (port == 0 || authFile.empty()) {
+    if (port == 0) {
         std::cerr << "Port or auth file not provided. Use -p <port> and -s <auth_file>." << std::endl;
         return EXIT_FAILURE;
     }
 
-    std::map<std::string, std::string> auth = loadAuthDetails(authFile);
+    // Check if authentication file exists, if not, create it
+    if (!fileExists(authFilename)) {
+        if (!generateAuthFile(authFilename)) {
+            std::cerr << "Failed to generate authentication file." << std::endl;
+            return EXIT_FAILURE;
+        }
+        auth_key = read_auth_key(authFilename);
+    }
+    else{
+        std::cerr << "Authentication file already exists." << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::map<std::string, std::string> config = readConfig("db_config.txt");
     
     // Check if all necessary fields (host, user, password, database) are present in the auth file
-    if (auth.find("host") == auth.end() || auth.find("user") == auth.end() || 
-        auth.find("password") == auth.end() || auth.find("database") == auth.end()) {
+    if (config.find("host") == config.end() || config.find("user") == config.end() || 
+        config.find("password") == config.end() || config.find("database") == config.end()) {
         std::cerr << "Missing required authentication details in the auth file." << std::endl;
         return EXIT_FAILURE;
     }
@@ -41,7 +56,7 @@ int main(int argc, char *argv[]) {
     SSL_CTX *ctx = initSSLContext();
 
     // Listen for connections securely using SSL
-    listenForConnections(port, auth, ctx);
+    listenForConnections(port, config, ctx, auth_key);
 
     SSL_CTX_free(ctx);
     return 0;

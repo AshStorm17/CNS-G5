@@ -1,6 +1,6 @@
+#pragma once
 #ifndef BANK_H
 #define BANK_H
-
 #include <cppconn/driver.h>
 #include <cppconn/connection.h>
 #include <cppconn/statement.h>
@@ -277,7 +277,7 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
 
 
 // Updated handleClient to authenticate PIN for modify command
-void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
+void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string& auth_key) {
     char buffer[1024];
     bzero(buffer, sizeof(buffer));
 
@@ -287,6 +287,9 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
         SSL_write(ssl, "Error receiving data!\n", 22);
         return;
     }
+
+    // Decrypt recieved request using auth file as key. Decrypted message is a json stylised string.
+    
 
     // Parse the received JSON request
     std::string request(buffer);
@@ -342,15 +345,26 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn) {
 }
 
 
-// Function to load authentication details from a file
-std::map<std::string, std::string> loadAuthDetails(const std::string &filename) {
-    std::ifstream file(filename);
-    std::map<std::string, std::string> auth;
-    std::string key, value;
-    while (file >> key >> value) {
-        auth[key] = value;
+std::map<std::string, std::string> readConfig(const std::string& filename) {
+    std::map<std::string, std::string> config;
+    std::ifstream configFile(filename);
+    std::string line;
+
+    if (!configFile.is_open()) {
+        std::cerr << "Unable to open config file!" << std::endl;
+        return config;
     }
-    return auth;
+
+    while (std::getline(configFile, line)) {
+        size_t delimiterPos = line.find('=');
+        if (delimiterPos != std::string::npos) {
+            std::string key = line.substr(0, delimiterPos);
+            std::string value = line.substr(delimiterPos + 1);
+            config[key] = value;
+        }
+    }
+    configFile.close();
+    return config;
 }
 
 // Initialize MySQL connection
@@ -387,7 +401,7 @@ SSL_CTX* initSSLContext() {
 }
 
 // Listen for incoming client connections over SSL
-void listenForConnections(int port, const std::map<std::string, std::string>& auth, SSL_CTX* ctx) {
+void listenForConnections(int port, const std::map<std::string, std::string>& auth, SSL_CTX* ctx, std::string& auth_key) {
     int serverSocket, clientSocket;
     struct sockaddr_in serverAddr, clientAddr;
     socklen_t addr_size = sizeof(clientAddr);
@@ -428,7 +442,7 @@ void listenForConnections(int port, const std::map<std::string, std::string>& au
         } else {
             std::cout << "Client connected via SSL." << std::endl;
             sql::Connection *conn = initDatabaseConnection(auth);
-            handleClient(clientSocket, ssl, conn);
+            handleClient(clientSocket, ssl, conn, auth_key);
             conn->close();
             delete conn;
         }
@@ -438,6 +452,8 @@ void listenForConnections(int port, const std::map<std::string, std::string>& au
         close(clientSocket);
     }
 }
+
+
 
 
 #endif // BANK_H
