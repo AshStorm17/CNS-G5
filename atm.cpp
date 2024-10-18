@@ -22,6 +22,9 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/sha.h>
+#include <openssl/aes.h>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
 
 
 std::string read_auth_key(std::string& authFilename) {
@@ -83,8 +86,11 @@ std::map<std::string, std::string> loadAuthDetails(const std::string &filename) 
     return auth;
 }
 
-bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response) {
-    if (SSL_write(ssl, request.c_str(), request.size()) <= 0) {
+
+bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response, const unsigned char* key, const unsigned char* iv) {
+    std::string encryptedRequest = encryptMessage(request, key, iv);
+
+    if (SSL_write(ssl, encryptedRequest.c_str(), encryptedRequest.size()) <= 0) {
         std::cerr << "Error sending request to the bank server." << std::endl;
         return false;
     }
@@ -101,6 +107,26 @@ bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response)
     response = std::string(buffer, bytesReceived);
     return true;
 }
+
+
+// bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response) {
+//     if (SSL_write(ssl, request.c_str(), request.size()) <= 0) {
+//         std::cerr << "Error sending request to the bank server." << std::endl;
+//         return false;
+//     }
+
+//     char buffer[1024];
+//     memset(buffer, 0, sizeof(buffer));
+
+//     int bytesReceived = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+//     if (bytesReceived <= 0) {
+//         std::cerr << "Error receiving response from the bank server." << std::endl;
+//         return false;
+//     }
+
+//     response = std::string(buffer, bytesReceived);
+//     return true;
+// }
 
 
 // Function to send a request to the bank server and receive a response
@@ -160,6 +186,38 @@ std::string readHashedPin(const std::string& cardFile) {
     return hashedPin;
 }
 
+std::string encryptMessage(const std::string& plaintext, const unsigned char* key, const unsigned char* iv) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    int len;
+    int ciphertext_len;
+    std::string ciphertext;
+
+    if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+        std::cerr << "Error initializing encryption context" << std::endl;
+        return "";
+    }
+
+    ciphertext.resize(plaintext.size() + AES_BLOCK_SIZE);
+    if (!EVP_EncryptUpdate(ctx, (unsigned char*)&ciphertext[0], &len, (const unsigned char*)plaintext.c_str(), plaintext.size())) {
+        std::cerr << "Error encrypting plaintext" << std::endl;
+        return "";
+    }
+
+    ciphertext_len = len;
+
+    if (!EVP_EncryptFinal_ex(ctx, (unsigned char*)&ciphertext[ciphertext_len], &len)) {
+        std::cerr << "Error finalizing encryption" << std::endl;
+        return "";
+    }
+
+    ciphertext_len += len;
+    ciphertext.resize(ciphertext_len);
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    return ciphertext;
+}
+
 // Main function for the ATM application
 int main(int argc, char *argv[]) {
     std::string authFile = "bank.auth";
@@ -170,6 +228,21 @@ int main(int argc, char *argv[]) {
     std::string mode;
     std::string balance;
     std::string hashedPin;
+
+    std::string authKey = read_auth_key(authFile);
+    if (authKey.empty()) {
+        return 255;
+    }
+
+    unsigned char key[KEY_LENGTH / 8];
+    std::stringstream(authKey) >> std::hex >> std::setw(KEY_LENGTH / 4) >> std::setfill('0');
+    std::copy(authKey.begin(), authKey.end(), key);
+
+    unsigned char iv[AES_BLOCK_SIZE];
+    if (!RAND_bytes(iv, AES_BLOCK_SIZE)) {
+        std::cerr << "Error generating random IV" << std::endl;
+        return 255;
+    }
 
     int opt;
     while ((opt = getopt(argc, argv, "s:i:p:c:a:n:d:w:g:")) != -1) {
@@ -288,10 +361,13 @@ int main(int argc, char *argv[]) {
         jsonRequest["pin_hash"] = hashedPin;  // Include the hashed PIN in the request
         std::string requestStr = jsonRequest.toStyledString();
 
+
+
+
         // Send request to bank
-        if (sendSSLRequest(ssl, requestStr, response)) {
-            std::cout << response << std::endl;
-        }
+        if (sendSSLRequest(ssl, requestStr, response, key, iv)) {
+        std::cout << response << std::endl;
+    }
 
         // Create the card file with the a random PIN code
         std::ofstream newCardFile(cardFile);
@@ -325,9 +401,9 @@ int main(int argc, char *argv[]) {
         std::string requestStr = jsonRequest.toStyledString();
 
         // Send request to bank
-        if (sendSSLRequest(ssl, requestStr, response)) {
-            std::cout << response << std::endl;
-        }
+        if (sendSSLRequest(ssl, requestStr, response, key, iv)) {
+        std::cout << response << std::endl;
+    }
 
     } else if (mode == "GET_BALANCE") {
         std::ifstream cardFileStream(cardFile);
@@ -349,8 +425,8 @@ int main(int argc, char *argv[]) {
         std::string requestStr = jsonRequest.toStyledString();
 
         // Send request to bank
-        if (sendSSLRequest(ssl, requestStr, response)) {
-            std::cout << response << std::endl;
+        if (sendSSLRequest(ssl, requestStr, response, key, iv)) {
+        std::cout << response << std::endl;
         }
     }
 
