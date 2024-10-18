@@ -48,38 +48,6 @@ std::string hashPin(const std::string& pin) {
     return ss.str();
 }
 
-std::string decryptMessage(const std::string& ciphertext, const unsigned char* key, const unsigned char* iv) {
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    int len;
-    int plaintext_len;
-    std::string plaintext;
-
-    if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
-        std::cerr << "Error initializing decryption context" << std::endl;
-        return "";
-    }
-
-    plaintext.resize(ciphertext.size());
-    if (!EVP_DecryptUpdate(ctx, (unsigned char*)&plaintext[0], &len, (const unsigned char*)ciphertext.c_str(), ciphertext.size())) {
-        std::cerr << "Error decrypting ciphertext" << std::endl;
-        return "";
-    }
-
-    plaintext_len = len;
-
-    if (!EVP_DecryptFinal_ex(ctx, (unsigned char*)&plaintext[plaintext_len], &len)) {
-        std::cerr << "Error finalizing decryption" << std::endl;
-        return "";
-    }
-
-    plaintext_len += len;
-    plaintext.resize(plaintext_len);
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    return plaintext;
-}
-
 // Authenticate the client by checking account_number and pin from the database
 bool authenticateClient(const std::string& account_number, const std::string& pin, sql::Connection *conn) {
     std::lock_guard<std::mutex> lock(db_mutex);
@@ -308,41 +276,62 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
 }
 
 
-// Updated handleClient to authenticate PIN for modify command
+std::string generateHMAC(const std::string& message, const std::string& key) {
+    unsigned char* result;
+    unsigned int len = SHA256_DIGEST_LENGTH;
+
+    result = HMAC(EVP_sha256(), key.c_str(), key.size(), 
+                  (unsigned char*)message.c_str(), message.size(), NULL, NULL);
+
+    // Convert the result to a hex string
+    std::string hmac_result;
+    for (unsigned int i = 0; i < len; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", result[i]);
+        hmac_result.append(buf);
+    }
+
+    return hmac_result;
+}
+
 void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string& auth_key) {
     char buffer[1024];
     bzero(buffer, sizeof(buffer));
 
-    // Read the request from the client (ATM)
+    // Step 1: Read the request (JSON + HMAC) from the client (ATM)
     int bytes = SSL_read(ssl, buffer, sizeof(buffer));
     if (bytes <= 0) {
         SSL_write(ssl, "Error receiving data!\n", 22);
         return;
     }
 
-    // Extract the IV from the beginning of the received message
-    // Decrypt recieved request using auth file as key. Decrypted message is a json stylised string.
-    unsigned char iv[AES_BLOCK_SIZE];
-    memcpy(iv, buffer, AES_BLOCK_SIZE);
-
-    // Decrypt the received message using the symmetric key and IV
-    std::string encryptedMessage(buffer + AES_BLOCK_SIZE, bytes - AES_BLOCK_SIZE);
-    unsigned char key[KEY_LENGTH / 8];
-    std::stringstream(auth_key) >> std::hex >> std::setw(KEY_LENGTH / 4) >> std::setfill('0');
-    std::copy(auth_key.begin(), auth_key.end(), key);
-    std::string request = decryptMessage(encryptedMessage, key, iv);
+    std::string received_message(buffer, bytes);
     
+    // Step 2: Separate the JSON request and the HMAC
+    size_t separator_pos = received_message.find("|");
+    if (separator_pos == std::string::npos) {
+        SSL_write(ssl, "Invalid message format. HMAC missing.\n", 38);
+        return;
+    }
 
-    // Parse the received JSON request
-    std::string request(buffer);
+    std::string json_request_str = received_message.substr(0, separator_pos);
+    std::string received_hmac = received_message.substr(separator_pos + 1);
+
+    // Step 3: Recompute the HMAC using the received JSON request and the shared auth_key
+    std::string computed_hmac = generateHMAC(json_request_str, auth_key);
+
+    // Step 4: Compare the received HMAC with the recomputed HMAC
+    if (received_hmac != computed_hmac) {
+        SSL_write(ssl, "Authentication failed: Invalid HMAC\n", 37);
+        return;
+    }
+
+    // Step 5: Parse the JSON request after validating the HMAC
     Json::Value jsonRequest;
     Json::CharReaderBuilder reader;
     std::string errors;
 
-    // Create an input stream from the request string
-    std::istringstream iss(request);
-
-    // Now pass the lvalue (iss) to parseFromStream
+    std::istringstream iss(json_request_str);
     if (!Json::parseFromStream(reader, iss, &jsonRequest, &errors)) {
         SSL_write(ssl, "Invalid JSON format\n", 20);
         return;
@@ -351,7 +340,9 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
     // Extract the operation from the JSON request
     std::string command = jsonRequest["operation"].asString();
     std::string account_number = jsonRequest["account"].asString();
-    std::string pin = "1010";
+    std::string pin = "1010"; // Using a static pin for simplicity here
+
+    // Step 6: Process the request based on the command
     if (command == "CREATE") {
         std::string initial_balance = jsonRequest["initial_balance"].asString();
         if (createAccount(account_number, pin, conn, initial_balance)) {
