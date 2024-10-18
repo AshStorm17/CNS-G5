@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/sha.h>
 
 SSL_CTX* initClientSSLContext() {
     SSL_load_error_strings();
@@ -95,6 +96,38 @@ int generateRandomPin() {
     return rand() % 9000 + 1000; // Generates a 4-digit PIN code
 }
 
+std::string hashPin(int pin) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    std::string pinStr = std::to_string(pin);
+
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, pinStr.c_str(), pinStr.length());
+    SHA256_Final(hash, &sha256);
+
+    std::stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+
+    return ss.str();
+}
+
+// Function to read the hashed PIN from the card file
+std::string readHashedPin(const std::string& cardFile) {
+    std::ifstream file(cardFile);
+    std::string hashedPin;
+
+    if (file) {
+        std::getline(file, hashedPin);
+    } else {
+        std::cerr << "Error reading card file." << std::endl;
+        exit(255);
+    }
+
+    return hashedPin;
+}
+
 // Main function for the ATM application
 int main(int argc, char *argv[]) {
     std::string authFile = "bank.auth";
@@ -104,6 +137,7 @@ int main(int argc, char *argv[]) {
     std::string account;
     std::string mode;
     std::string balance;
+    std::string hashedPin;
 
     int opt;
     while ((opt = getopt(argc, argv, "s:i:p:c:a:n:d:w:g:")) != -1) {
@@ -145,8 +179,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Validate required parameters
-    if (account.empty() || (mode.empty() && !balance.empty()) || (mode != "GET_BALANCE" && balance.empty())) {
-        std::cerr << "Account and operation parameters are required." << std::endl;
+    if ((mode != "GET_BALANCE" && account.empty()) || (mode.empty() && !balance.empty()) || (mode != "GET_BALANCE" && balance.empty())) {
+        std::cerr << "Account and operation parameters are required except for GET_BALANCE." << std::endl;
         return 255;
     }
 
@@ -210,11 +244,16 @@ int main(int argc, char *argv[]) {
             return 255;
         }
 
+        // Generate and hash the PIN
+        int pin_code = generateRandomPin();
+        hashedPin = hashPin(pin_code);
+
         // Create JSON request for creating an account
         Json::Value jsonRequest;
         jsonRequest["operation"] = "CREATE";
         jsonRequest["account"] = account;
         jsonRequest["initial_balance"] = std::stod(balance);
+        jsonRequest["pin_hash"] = hashedPin;  // Include the hashed PIN in the request
         std::string requestStr = jsonRequest.toStyledString();
 
         // Send request to bank
@@ -222,23 +261,35 @@ int main(int argc, char *argv[]) {
             std::cout << response << std::endl;
         }
 
-        // Create the card file with a random PIN code
+        // Create the card file with the hashed PIN code
         std::ofstream newCardFile(cardFile);
         if (newCardFile) {
-            int pin_code = generateRandomPin();
             newCardFile << pin_code;
             newCardFile.close();
-            std::cout << "Card file created with PIN: " << pin_code << std::endl;
+            std::cout << "Card file created with hashed PIN." << std::endl;
         } else {
             std::cerr << "Error creating card file." << std::endl;
         }
 
     } else if (mode == "DEPOSIT" || mode == "WITHDRAW") {
+
+        std::ifstream cardFileStream(cardFile);
+        if (cardFileStream) {
+            std::getline(cardFileStream, hashedPin);
+            cardFileStream.close();
+        } else {
+            std::cerr << "Error reading card file." << std::endl;
+            close(sockfd);
+            return 255;
+        }
+        hashedPin = hashPin(std::stoi(hashedPin));
+        
         // Create JSON request for depositing or withdrawing money
         Json::Value jsonRequest;
         jsonRequest["operation"] = mode;
         jsonRequest["account"] = account;
         jsonRequest["amount"] = std::stod(balance);
+        jsonRequest["pin_hash"] = hashedPin; 
         std::string requestStr = jsonRequest.toStyledString();
 
         // Send request to bank
@@ -247,10 +298,22 @@ int main(int argc, char *argv[]) {
         }
 
     } else if (mode == "GET_BALANCE") {
+        std::ifstream cardFileStream(cardFile);
+        if (cardFileStream) {
+            std::getline(cardFileStream, hashedPin);
+            cardFileStream.close();
+        } else {
+            std::cerr << "Error reading card file." << std::endl;
+            close(sockfd);
+            return 255;
+        }
+        hashedPin = hashPin(std::stoi(hashedPin));
+
         // Create JSON request for getting balance
         Json::Value jsonRequest;
         jsonRequest["operation"] = "GET_BALANCE";
         jsonRequest["account"] = account;
+        jsonRequest["pin_hash"] = hashedPin;
         std::string requestStr = jsonRequest.toStyledString();
 
         // Send request to bank
