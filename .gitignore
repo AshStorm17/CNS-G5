@@ -35,6 +35,7 @@
 *.txt
 *.key
 *.crt
+*.card
 
 bank
 atm
