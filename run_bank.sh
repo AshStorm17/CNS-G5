@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default values
-PORT=8080
+PORT=3000
 AUTH_FILE="bank.auth"
 
 # Parse command-line arguments for port (-p) and auth file (-s)
@@ -24,12 +24,11 @@ while getopts ":p:s:" opt; do
   esac
 done
 
-# Certificate Generation
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout server.key -out server.crt
+# Silent Certificate Generation with predefined values
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout server.key -out server.crt -subj "/C=US/ST=State/L=City/O=Organization/OU=Department/CN=localhost" > /dev/null 2>&1
 
 # Compile the bank server
 g++ -std=c++11 bank.cpp -o bank.o -lssl -lcrypto -lmysqlcppconn -lpthread -ljsoncpp
 
 # Run the bank server with the specified port and auth file
-echo "Running bank server on port $PORT"
 ./bank.o -p "$PORT" -s "$AUTH_FILE"
