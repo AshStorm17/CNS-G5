@@ -28,7 +28,7 @@ done
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout server.key -out server.crt
 
 # Compile the bank server
-g++ -std=c++11 bank.cpp -o bank.o -lssl -lcrypto -lmysqlcppconn -lpthread
+g++ -std=c++11 bank.cpp -o bank.o -lssl -lcrypto -lmysqlcppconn -lpthread -ljsoncpp
 
 # Run the bank server with the specified port and auth file
 echo "Running bank server on port $PORT"
