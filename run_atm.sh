@@ -20,6 +20,10 @@ usage() {
     exit 255
 }
 
+
+# Compile the atm server
+g++ -std=c++11 atm.cpp -o atm.o -lssl -lcrypto -lmysqlcppconn -lpthread
+
 # Parse command-line arguments
 while getopts ":a:s:i:p:c:n:d:w:g" opt; do
     case ${opt} in
