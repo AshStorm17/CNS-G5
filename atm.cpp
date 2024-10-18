@@ -23,6 +23,38 @@
 #include <openssl/err.h>
 #include <openssl/sha.h>
 
+
+std::string read_auth_key(std::string& authFilename) {
+    std::ifstream authFile(authFilename);
+    if (!authFile.is_open()) {
+        std::cerr << "Error opening authentication file: " << authFilename << std::endl;
+        return "";
+    }
+
+    std::string line;
+    std::string key;
+
+    // Read the file line by line
+    while (std::getline(authFile, line)) {
+        // Check if the line contains "symmetric_key"
+        std::size_t pos = line.find("symmetric_key: ");
+        if (pos != std::string::npos) {
+            // Extract the key part from the line (after "symmetric_key: ")
+            key = line.substr(pos + std::string("symmetric_key: ").length());
+            break;
+        }
+    }
+
+    authFile.close();
+
+    if (key.empty()) {
+        std::cerr << "Error: No symmetric key found in the authentication file." << std::endl;
+        return "";
+    }
+
+    return key;
+}
+
 SSL_CTX* initClientSSLContext() {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
