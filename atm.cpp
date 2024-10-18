@@ -261,12 +261,12 @@ int main(int argc, char *argv[]) {
             std::cout << response << std::endl;
         }
 
-        // Create the card file with the hashed PIN code
+        // Create the card file with the a random PIN code
         std::ofstream newCardFile(cardFile);
         if (newCardFile) {
             newCardFile << pin_code;
             newCardFile.close();
-            std::cout << "Card file created with hashed PIN." << std::endl;
+            std::cout << "Card file created with PIN: " << pin_code << std::endl;
         } else {
             std::cerr << "Error creating card file." << std::endl;
         }
