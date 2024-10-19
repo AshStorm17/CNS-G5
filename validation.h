@@ -60,6 +60,9 @@ bool isValidIPAddress(const std::string& ip) {
     return std::regex_match(ip, ip_pattern);
 }
 
-
+bool isPositiveDecimal(const std::string &number) {
+    std::regex decimalPattern(R"(^[+]?\d*\.?\d+$)"); // Allows for positive decimal numbers
+    return std::regex_match(number, decimalPattern);
+}
 
 #endif // VALIDATION_H
