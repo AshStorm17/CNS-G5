@@ -23,7 +23,32 @@
 #include <openssl/err.h>
 #include <openssl/sha.h>
 #include <random>
+#include <netdb.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include "validation.h"
 
+// Helper function to handle timeouts using select()
+bool handleTimeout(int sockfd, int timeoutSeconds) {
+    fd_set fds;
+    struct timeval tv;
+
+    FD_ZERO(&fds);
+    FD_SET(sockfd, &fds);
+
+    tv.tv_sec = timeoutSeconds;
+    tv.tv_usec = 0;
+
+    int result = select(sockfd + 1, &fds, NULL, NULL, &tv);
+    if (result == -1) {
+        std::cerr << "Error in select()" << std::endl;
+        return false;
+    } else if (result == 0) {
+        std::cerr << "Timeout while waiting for response." << std::endl;
+        return false;
+    }
+    return true;
+}
 
 std::string read_auth_key(std::string& authFilename) {
     std::ifstream authFile(authFilename);
@@ -84,28 +109,6 @@ std::map<std::string, std::string> loadAuthDetails(const std::string &filename) 
     return auth;
 }
 
-// bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response) {
-    
-    
-//     if (SSL_write(ssl, request.c_str(), request.size()) <= 0) {
-//         std::cerr << "Error sending request to the bank server." << std::endl;
-//         return false;
-//     }
-
-//     char buffer[1024];
-//     memset(buffer, 0, sizeof(buffer));
-
-//     int bytesReceived = SSL_read(ssl, buffer, sizeof(buffer) - 1);
-//     if (bytesReceived <= 0) {
-//         std::cerr << "Error receiving response from the bank server." << std::endl;
-//         return false;
-//     }
-
-//     response = std::string(buffer, bytesReceived);
-//     return true;
-// }
-
-
 // Function to generate HMAC-SHA256 using the request and the shared key
 std::string generateHMAC(const std::string& message, const std::string& key) {
     unsigned char* result;
@@ -137,6 +140,10 @@ bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response,
     if (SSL_write(ssl, full_request.c_str(), full_request.size()) <= 0) {
         std::cerr << "Error sending request to the bank server." << std::endl;
         return false;
+    }
+
+    if (!handleTimeout(SSL_get_fd(ssl), 10)) {  // 10 seconds timeout
+        return false;  // Timeout occurred
     }
 
     // Step 4: Receive the response from the server
@@ -355,15 +362,25 @@ int main(int argc, char *argv[]) {
             std::cout << response << std::endl;
         }
 
+        std::istringstream responseStream(response);
+        std::string firstWord;
+        responseStream >> firstWord; // Read the first word
+        
         // Create the card file with the a random PIN code
         std::ofstream newCardFile(cardFile);
-        if (newCardFile) {
+        if (firstWord  == "Error"){
+            std::remove(cardFile.c_str());
+        }
+        else{
+            if (newCardFile) {
             newCardFile << pin_code;
             newCardFile.close();
             std::cout << "Card file created with PIN: " << pin_code << std::endl;
         } else {
             std::cerr << "Error creating card file." << std::endl;
         }
+        }
+        
 
     } else if (mode == "DEPOSIT" || mode == "WITHDRAW") {
 
