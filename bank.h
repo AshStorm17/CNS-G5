@@ -147,7 +147,7 @@ void viewAccountDetails(const std::string& account_number, sql::Connection *conn
 }
 
 // Function to modify account details (e.g., update balance) with PIN authentication
-bool depositAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn) {
+bool depositAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn, SSL *ssl) {
     std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
@@ -199,6 +199,10 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
 
         try {
             pstmt->executeUpdate();
+            std::string transac_details = "Account number: "+ account_number + "\n";
+            transac_details = transac_details + "Old Balance: " + std::to_string(old_balance) + "\n";
+            transac_details = transac_details + "New Balance: " + std::to_string(updated_balance) + "\n";
+            SSL_write(ssl, transac_details.c_str(), transac_details.size());
             delete pstmt; // Clean up after execution
             return true; // Modification successful
         } catch (sql::SQLException &e) {
@@ -215,7 +219,7 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
 }
 
 // Function to withdraw from account with PIN authentication
-bool withdrawAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn) {
+bool withdrawAccountDetails(const std::string& account_number, const std::string& pin, const std::string& transac, sql::Connection *conn, SSL *ssl) {
     std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
@@ -271,6 +275,10 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
 
             try {
                 pstmt->executeUpdate();
+                std::string transac_details = "Account number: "+ account_number + "\n";
+                transac_details = transac_details + "Old Balance: " + std::to_string(old_balance) + "\n";
+                transac_details = transac_details + "New Balance: " + std::to_string(updated_balance) + "\n";
+                SSL_write(ssl, transac_details.c_str(), transac_details.size());
                 delete pstmt;  // Clean up after execution
                 return true;  // Withdrawal successful
             } catch (sql::SQLException &e) {
@@ -388,7 +396,7 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
     } else if (command == "DEPOSIT") {
         try {
             std::string transac = jsonRequest["amount"].asString();
-            if (depositAccountDetails(account_number, pin, transac, conn)) {
+            if (depositAccountDetails(account_number, pin, transac, conn, ssl)) {
                 SSL_write(ssl, "Account modification successful\n", 34);
             } else {
                 SSL_write(ssl, "Account modification failed or authentication required\n", 56);
@@ -400,7 +408,7 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
     } else if (command == "WITHDRAW") {
         try {
             std::string transac = jsonRequest["amount"].asString();
-            if (withdrawAccountDetails(account_number, pin, transac, conn)) {
+            if (withdrawAccountDetails(account_number, pin, transac, conn, ssl)) {
                 SSL_write(ssl, "Account modification successful\n", 34);
             } else {
                 SSL_write(ssl, "Account modification failed or authentication required\n", 56);
