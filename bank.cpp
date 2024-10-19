@@ -1,3 +1,4 @@
+#include "validation.h"
 #include "bank.h"
 #include "auth.h"
 #include <iostream>
@@ -47,8 +48,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (port == 0) {
-        std::cerr << "Port or auth file not provided. Use -p <port> and -s <auth_file>." << std::endl;
+    if (!isValidPort(port)) {
+        std::cerr << "Port number must be between 1024 and 65535 inclusively." << std::endl;
         return EXIT_FAILURE;
     }
 

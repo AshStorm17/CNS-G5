@@ -24,6 +24,9 @@
 #include <iostream>
 #include <mutex>
 #include <jsoncpp/json/json.h>
+#include <chrono> // Include this for timing
+#include <thread> // Include this for sleep or delays
+
 std::mutex db_mutex;
 
 // Hash the pin using a secure hashing algorithm
@@ -362,64 +365,63 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
     std::string account_number = jsonRequest["account"].asString();
     std::string pin = jsonRequest["pin_hash"].asString();
 
-    // Step 6: Process the request based on the command
-    if (command == "CREATE") {
-        try {
+    // Define timeout duration (in seconds)
+    const int timeout_duration = 10; // Example: 5 seconds
+
+    // Start measuring time
+    auto start_time = std::chrono::steady_clock::now();
+
+    // Begin a transaction
+    conn->setAutoCommit(false); // Disable auto-commit
+    bool success = false; // Track success of operations    
+
+    try {
+        // Step 6: Process the request based on the command
+        if (command == "CREATE") {
             std::string initial_balance = jsonRequest["initial_balance"].asString();
-            if (createAccount(account_number, pin, conn, initial_balance)) {
-                SSL_write(ssl, "Account creation successful\n", 30);
-            } else {
-                SSL_write(ssl, "Account creation failed\n", 24);
-            }
-        } catch (const std::exception& e) {
-            std::string error_msg = "Error during account creation: " + std::string(e.what()) + "\n";
-            SSL_write(ssl, error_msg.c_str(), error_msg.size());
-        }
-    } else if (command == "DELETE") {
-        try {
-            if (deleteAccount(account_number, pin, conn)) {
-                SSL_write(ssl, "Account deletion successful\n", 30);
-            } else {
-                SSL_write(ssl, "Account deletion failed\n", 24);
-            }
-        } catch (const std::exception& e) {
-            std::string error_msg = "Error during account deletion: " + std::string(e.what()) + "\n";
-            SSL_write(ssl, error_msg.c_str(), error_msg.size());
-        }
-    } else if (command == "GET_BALANCE") {
-        try {
+            success = createAccount(account_number, pin, conn, initial_balance);
+            SSL_write(ssl, success ? "Account creation successful\n" : "Account creation failed\n", 30);
+        } else if (command == "DELETE") {
+            success = deleteAccount(account_number, pin, conn);
+            SSL_write(ssl, success ? "Account deletion successful\n" : "Account deletion failed\n", 30);
+        } else if (command == "GET_BALANCE") {
             viewAccountDetails(account_number, conn, ssl);
-        } catch (const std::exception& e) {
-            std::string error_msg = "Error fetching account details: " + std::string(e.what()) + "\n";
-            SSL_write(ssl, error_msg.c_str(), error_msg.size());
-        }
-    } else if (command == "DEPOSIT") {
-        try {
+            success = true; // Assume success for read operations
+        } else if (command == "DEPOSIT") {
             std::string transac = jsonRequest["amount"].asString();
-            if (depositAccountDetails(account_number, pin, transac, conn, ssl)) {
-                SSL_write(ssl, "Account modification successful\n", 34);
-            } else {
-                SSL_write(ssl, "Account modification failed or authentication required\n", 56);
-            }
-        } catch (const std::exception& e) {
-            std::string error_msg = "Error during deposit: " + std::string(e.what()) + "\n";
-            SSL_write(ssl, error_msg.c_str(), error_msg.size());
-        }
-    } else if (command == "WITHDRAW") {
-        try {
+            success = depositAccountDetails(account_number, pin, transac, conn, ssl);
+            SSL_write(ssl, success ? "Account modification successful\n" : "Account modification failed or authentication required\n", 56);
+        } else if (command == "WITHDRAW") {
             std::string transac = jsonRequest["amount"].asString();
-            if (withdrawAccountDetails(account_number, pin, transac, conn, ssl)) {
-                SSL_write(ssl, "Account modification successful\n", 34);
-            } else {
-                SSL_write(ssl, "Account modification failed or authentication required\n", 56);
-            }
-        } catch (const std::exception& e) {
-            std::string error_msg = "Error during withdrawal: " + std::string(e.what()) + "\n";
-            SSL_write(ssl, error_msg.c_str(), error_msg.size());
+            success = withdrawAccountDetails(account_number, pin, transac, conn, ssl);
+            SSL_write(ssl, success ? "Account modification successful\n" : "Account modification failed or authentication required\n", 56);
+        } else {
+            SSL_write(ssl, "Unknown command\n", 16);
         }
-    } else {
-        SSL_write(ssl, "Unknown command\n", 16);
+
+        // Check if the operation exceeded the timeout
+        auto end_time = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end_time - start_time;
+
+        if (elapsed_seconds.count() > timeout_duration) {
+            throw std::runtime_error("Protocol error: Operation timed out");
+        }
+
+        // If everything is successful, commit the transaction
+        if (success) {
+            conn->commit();
+        } else {
+            throw std::runtime_error("Operation failed, rolling back");
+        }
+    } catch (const std::exception& e) {
+        // Rollback if an error occurs
+        conn->rollback();
+        std::string error_msg = "Error occurred: " + std::string(e.what()) + "\n";
+        SSL_write(ssl, error_msg.c_str(), error_msg.size());
     }
+    
+    // Ensure that auto-commit is re-enabled
+    conn->setAutoCommit(true);
 }
 
 
@@ -530,8 +532,5 @@ void listenForConnections(int port, const std::map<std::string, std::string>& au
         close(clientSocket);
     }
 }
-
-
-
 
 #endif // BANK_H
