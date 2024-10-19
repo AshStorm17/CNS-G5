@@ -62,7 +62,6 @@ int main() {
         // Process the result set
         while (res->next()) {
             std::cout << "ID: " << res->getInt("id") << std::endl;
-            std::cout << "Name: " << res->getString("name") << std::endl;
             std::cout << "Account Number: " << res->getString("account_number") << std::endl;
             std::cout << "Balance: " << res->getDouble("balance") << std::endl;
             std::cout << "PIN: " << res->getString("pin") << std::endl;
