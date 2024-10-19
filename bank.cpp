@@ -53,6 +53,10 @@ int main(int argc, char *argv[]) {
         std::cerr << "Port number must be between 1024 and 65535 inclusively." << std::endl;
         return 255;
     }
+    if (!isValidFilename(authFilename)) {
+        std::cerr << "Invalid Auth File name." << std::endl;
+        return 255;
+    }
 
     // Check if authentication file exists, if not, create it
     if (!fileExists(authFilename)) {
