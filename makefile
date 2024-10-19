@@ -16,10 +16,14 @@ DB_USER := $(call get_db_config,user)
 DB_PASSWORD := $(call get_db_config,password)
 DB_NAME := $(call get_db_config,database)
 
-# Rule to create symlinks for easy execution
-.PHONY: symlink
-symlink:
+# Rule to create symlink for bank
+.PHONY: bank
+bank:
 	ln -sf run_bank.sh $(BANK_SYMLINK)
+
+# Rule to create symlink for atm
+.PHONY: atm
+atm:
 	ln -sf run_atm.sh $(ATM_SYMLINK)
 
 # Rule to create the database if it doesn't exist
@@ -45,6 +49,3 @@ dropdb:
 # Clean up symlinks
 clean:
 	rm -f $(BANK_SYMLINK) $(ATM_SYMLINK)
-
-# Combined rule to create symlinks
-all: symlink
