@@ -10,7 +10,7 @@ bool isValidFilename(const std::string& filename) {
     if (filename.length() < 1 || filename.length() > 127) {
         return false;
     }
-    std::regex valid_chars("^[_.\\-0-9a-z]+$");
+    std::regex valid_chars(R"(^[_\-0-9a-z]([_\-\.0-9a-z]{0,125}[_\-0-9a-z])?$)");
     if (!std::regex_match(filename, valid_chars)) {
         return false;
     }
