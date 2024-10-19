@@ -3,12 +3,34 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <cstdio>
+#include <csignal>
+#include <fstream>
+
+std::string authFilename;
+
+// Signal handler for SIGINT (Ctrl + C)
+void signalHandler(int signum) {
+    // Cleanup resources before exiting
+    std::cout << "\nInterrupt signal (" << signum << ") received. Closing the bank..." << std::endl;
+
+    // Delete the auth file
+    if (remove(authFilename.c_str()) != 0) {
+        std::cerr << "Error deleting the authentication file: " << authFilename << std::endl;
+    } else {
+        std::cout << "Authentication file deleted successfully." << std::endl;
+    }
+
+    // Exit the program
+    exit(signum);
+}
 
 int main(int argc, char *argv[]) {
     int opt;
-    std::string authFilename;
     std::string auth_key;
     int port = 0;
+
+    signal(SIGINT, signalHandler);
 
     // Parse command-line options using getopt
     while ((opt = getopt(argc, argv, "p:s:")) != -1) {
@@ -59,5 +81,12 @@ int main(int argc, char *argv[]) {
     listenForConnections(port, config, ctx, auth_key);
 
     SSL_CTX_free(ctx);
+
+    if (remove(authFilename.c_str()) != 0) {
+        std::cerr << "Error deleting the authentication file: " << authFilename << std::endl;
+    } else {
+        std::cout << "Authentication file deleted successfully." << std::endl;
+    }
+    
     return 0;
 }
