@@ -66,7 +66,7 @@ std::string trimLeadingSpaces(const std::string& str) {
 }
 
 bool isPositiveDecimal(const std::string &number) {
-    std::regex decimalPattern(R"(^[+]?\d*\.?\d+$)"); // Allows for positive decimal numbers
+    std::regex decimalPattern(R"(^0$|^[1-9]\d*(\.\d+)?$)");
     return std::regex_match(number, decimalPattern);
 }
 
