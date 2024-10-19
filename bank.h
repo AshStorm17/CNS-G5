@@ -465,7 +465,7 @@ SSL_CTX* initSSLContext() {
     if (!ctx) {
         std::cerr << "Unable to create SSL context" << std::endl;
         ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+        exit(255);
     }
 
     SSL_CTX_set_ecdh_auto(ctx, 1);
@@ -474,7 +474,7 @@ SSL_CTX* initSSLContext() {
     if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0 || 
         SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+        exit(255);
     }
 
     return ctx;

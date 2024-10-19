@@ -32,6 +32,7 @@ int main(int argc, char *argv[]) {
     int port = 0;
 
     signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
 
     // Parse command-line options using getopt
     while ((opt = getopt(argc, argv, "p:s:")) != -1) {
@@ -44,26 +45,26 @@ int main(int argc, char *argv[]) {
                 break;
             default:
                 std::cerr << "Usage: " << argv[0] << " -p <port> -s <auth_file>" << std::endl;
-                return EXIT_FAILURE;
+                return 255;
         }
     }
 
     if (!isValidPort(port)) {
         std::cerr << "Port number must be between 1024 and 65535 inclusively." << std::endl;
-        return EXIT_FAILURE;
+        return 255;
     }
 
     // Check if authentication file exists, if not, create it
     if (!fileExists(authFilename)) {
         if (!generateAuthFile(authFilename)) {
             std::cerr << "Failed to generate authentication file." << std::endl;
-            return EXIT_FAILURE;
+            return 255;
         }
         auth_key = read_auth_key(authFilename);
     }
     else{
         std::cerr << "Authentication file already exists." << std::endl;
-        return EXIT_FAILURE;
+        return 255;
     }
 
     std::map<std::string, std::string> config = readConfig("db_config.txt");
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]) {
     if (config.find("host") == config.end() || config.find("user") == config.end() || 
         config.find("password") == config.end() || config.find("database") == config.end()) {
         std::cerr << "Missing required authentication details in the auth file." << std::endl;
-        return EXIT_FAILURE;
+        return 255;
     }
 
     // Initialize SSL context
@@ -85,6 +86,7 @@ int main(int argc, char *argv[]) {
 
     if (remove(authFilename.c_str()) != 0) {
         std::cerr << "Error deleting the authentication file: " << authFilename << std::endl;
+        return 255;
     } else {
         std::cout << "Authentication file deleted successfully." << std::endl;
     }
