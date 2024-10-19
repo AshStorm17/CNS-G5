@@ -22,6 +22,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/sha.h>
+#include <random>
 
 
 std::string read_auth_key(std::string& authFilename) {
@@ -174,7 +175,11 @@ bool sendRequest(int sockfd, const std::string &request, std::string &response) 
 
 // Function to generate a random 4-digit PIN code
 int generateRandomPin() {
-    return rand() % 9000 + 1000; // Generates a 4-digit PIN code
+    std::random_device rd; // Hardware-based random number generator
+    std::mt19937 gen(rd()); // Seed the generator
+    std::uniform_int_distribution<> distr(1000, 9999); // Define the range for 4-digit PIN
+
+    return distr(gen);
 }
 
 std::string hashPin(int pin) {
