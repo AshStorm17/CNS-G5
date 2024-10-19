@@ -60,6 +60,11 @@ bool isValidIPAddress(const std::string& ip) {
     return std::regex_match(ip, ip_pattern);
 }
 
+std::string trimLeadingSpaces(const std::string& str) {
+    size_t first = str.find_first_not_of(' ');
+    return (first == std::string::npos) ? "" : str.substr(first);
+}
+
 bool isPositiveDecimal(const std::string &number) {
     std::regex decimalPattern(R"(^[+]?\d*\.?\d+$)"); // Allows for positive decimal numbers
     return std::regex_match(number, decimalPattern);
