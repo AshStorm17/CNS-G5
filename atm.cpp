@@ -143,7 +143,7 @@ bool sendSSLRequest(SSL* ssl, const std::string& request, std::string& response,
     }
 
     if (!handleTimeout(SSL_get_fd(ssl), 10)) {  // 10 seconds timeout
-        return false;  // Timeout occurred
+        return 63;  // Timeout occurred
     }
 
     // Step 4: Receive the response from the server
@@ -236,6 +236,12 @@ int main(int argc, char *argv[]) {
     while ((opt = getopt(argc, argv, "s:i:p:c:a:n:d:w:g")) != -1) {
         switch (opt) {
             case 's':
+                if (!isValidFilename(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid auth name." << std::endl;
+                    return 255;
+                }
+                cardFile = optarg;
+                break;
                 authFile = optarg;
                 break;
             case 'i':
@@ -245,20 +251,40 @@ int main(int argc, char *argv[]) {
                 port = std::stoi(optarg);
                 break;
             case 'c':
+                if (!isValidFilename(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid card name." << std::endl;
+                    return 255;
+                }
                 cardFile = optarg;
                 break;
             case 'a':
+                if (!isValidAccountName(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid account name." << std::endl;
+                    return 255;
+                }
                 account = optarg;
                 break;
             case 'n':
+                if (!isPositiveDecimal(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid initial amount." << std::endl;
+                    return 255;
+                }
                 mode = "CREATE";
                 balance = optarg;
                 break;
             case 'd':
+                if (!isPositiveDecimal(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid deposit amount." << std::endl;
+                    return 255;
+                }
                 mode = "DEPOSIT";
                 balance = optarg;
                 break;
             case 'w':
+                if (!isPositiveDecimal(trimLeadingSpaces(optarg))) {
+                    std::cerr << "Invalid withdraw amount." << std::endl;
+                    return 255;
+                }
                 mode = "WITHDRAW";
                 balance = optarg;
                 break;
@@ -304,7 +330,7 @@ int main(int argc, char *argv[]) {
     if (connect(sockfd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
         std::cerr << "Error connecting to the bank server." << std::endl;
         close(sockfd);
-        return 255;
+        return 63;
     }
 
 
@@ -320,7 +346,7 @@ int main(int argc, char *argv[]) {
         close(sockfd);
         SSL_free(ssl);
         SSL_CTX_free(ctx);
-        return 255;
+        return 63;
     }
 
     std::cout << "Connected with " << SSL_get_cipher(ssl) << " encryption" << std::endl;
