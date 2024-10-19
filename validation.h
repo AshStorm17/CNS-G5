@@ -1,0 +1,65 @@
+// validation.h
+#ifndef VALIDATION_H
+#define VALIDATION_H
+
+#include <string>
+#include <regex>
+
+// Function to validate filenames
+bool isValidFilename(const std::string& filename) {
+    if (filename.length() < 1 || filename.length() > 127) {
+        return false;
+    }
+    std::regex valid_chars("^[_.\\-0-9a-z]+$");
+    if (!std::regex_match(filename, valid_chars)) {
+        return false;
+    }
+    if (filename == "." || filename == "..") {
+        return false;
+    }
+    return true;
+}
+
+// Function to validate account names
+bool isValidAccountName(const std::string& accountName) {
+    if (accountName.length() < 1 || accountName.length() > 122) {
+        return false;
+    }
+    return isValidFilename(accountName); // Same character rules as filenames
+}
+
+// Function to validate positive numbers without leading zero
+bool isValidPositiveNumber(const std::string& number) {
+    std::regex valid_number("(0|[1-9][0-9]*)");
+    return std::regex_match(number, valid_number);
+}
+
+// Function to validate port number
+bool isValidPort(int port) {
+    return port >= 1024 && port <= 65535;
+}
+
+// Function to validate currency amounts
+bool isValidCurrencyAmount(const std::string& amount) {
+    std::regex valid_currency("([0-9]+)(\\.[0-9]{2})?");
+    if (!std::regex_match(amount, valid_currency)) {
+        return false;
+    }
+
+    // Check if the amount is within the valid range
+    size_t pos = amount.find('.');
+    unsigned long long whole_part = pos != std::string::npos ? std::stoull(amount.substr(0, pos)) : std::stoull(amount);
+    unsigned long long fractional_part = pos != std::string::npos ? std::stoull(amount.substr(pos + 1)) : 0;
+
+    return (whole_part <= 4294967295) && (fractional_part <= 99);
+}
+
+// Function to validate IPv4 addresses
+bool isValidIPAddress(const std::string& ip) {
+    std::regex ip_pattern(R"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\. (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\. (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\. (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))");
+    return std::regex_match(ip, ip_pattern);
+}
+
+
+
+#endif // VALIDATION_H
