@@ -92,6 +92,7 @@ bool createAccount(const std::string& account_number, const std::string& pin, sq
         success = true;
     } catch (sql::SQLException &e) {
         std::cerr << "Error creating account: " << e.what() << std::endl;
+        throw std::runtime_error(std::string(e.what()));
     }
 
     delete pstmt;
@@ -115,6 +116,7 @@ bool deleteAccount(const std::string& account_number, const std::string& pin, sq
         success = (rowsAffected > 0);
     } catch (sql::SQLException &e) {
         std::cerr << "Error deleting account: " << e.what() << std::endl;
+        throw std::runtime_error(std::string(e.what()));
     }
 
     delete pstmt;
@@ -185,6 +187,7 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
         double transac_double = std::stod(transac);  // Convert new_balance to double
         if(transac_double <= 0){
             std::cerr << "Invalid tranaction amount recieved." << std::endl;
+            throw std::runtime_error("Invalid tranaction amount recieved.");
             return false;
         }
 
@@ -200,9 +203,13 @@ bool depositAccountDetails(const std::string& account_number, const std::string&
             return true; // Modification successful
         } catch (sql::SQLException &e) {
             std::cerr << "Error modifying account details: " << e.what() << std::endl;
+            throw std::runtime_error(std::string(e.what()));
         }
 
         delete pstmt; // Clean up if not authenticated or if error occurred
+    }
+    else{
+        throw std::runtime_error("User authentication failed!");
     }
     return false; // Modification failed or not authenticated
 }
@@ -249,6 +256,7 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
 
         if(transac_double <= 0){
             std::cerr << "Invalid tranaction amount recieved." << std::endl;
+            throw std::runtime_error("Invalid tranaction amount recieved.");
             return false;
         }
 
@@ -267,10 +275,14 @@ bool withdrawAccountDetails(const std::string& account_number, const std::string
                 return true;  // Withdrawal successful
             } catch (sql::SQLException &e) {
                 std::cerr << "Error modifying account details: " << e.what() << std::endl;
+                throw std::runtime_error(std::string(e.what()));
             }
         } else {
             std::cerr << "Error: Insufficient funds. Cannot withdraw more than the current balance." << std::endl;
+            throw std::runtime_error("Insufficient funds. Cannot withdraw more than the current balance.");
         }
+    } else {
+        throw std::runtime_error("User authentication failed!");
     }
     return false;  // Withdrawal failed or not authenticated
 }
@@ -340,37 +352,62 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
     // Extract the operation from the JSON request
     std::string command = jsonRequest["operation"].asString();
     std::string account_number = jsonRequest["account"].asString();
-    std::string pin = "1010"; // Using a static pin for simplicity here
+    std::string pin = jsonRequest["pin_hash"].asString();
 
     // Step 6: Process the request based on the command
     if (command == "CREATE") {
-        std::string initial_balance = jsonRequest["initial_balance"].asString();
-        if (createAccount(account_number, pin, conn, initial_balance)) {
-            SSL_write(ssl, "Account creation successful\n", 30);
-        } else {
-            SSL_write(ssl, "Account creation failed\n", 24);
+        try {
+            std::string initial_balance = jsonRequest["initial_balance"].asString();
+            if (createAccount(account_number, pin, conn, initial_balance)) {
+                SSL_write(ssl, "Account creation successful\n", 30);
+            } else {
+                SSL_write(ssl, "Account creation failed\n", 24);
+            }
+        } catch (const std::exception& e) {
+            std::string error_msg = "Error during account creation: " + std::string(e.what()) + "\n";
+            SSL_write(ssl, error_msg.c_str(), error_msg.size());
         }
     } else if (command == "DELETE") {
-        if (deleteAccount(account_number, pin, conn)) {
-            SSL_write(ssl, "Account deletion successful\n", 30);
-        } else {
-            SSL_write(ssl, "Account deletion failed\n", 24);
+        try {
+            if (deleteAccount(account_number, pin, conn)) {
+                SSL_write(ssl, "Account deletion successful\n", 30);
+            } else {
+                SSL_write(ssl, "Account deletion failed\n", 24);
+            }
+        } catch (const std::exception& e) {
+            std::string error_msg = "Error during account deletion: " + std::string(e.what()) + "\n";
+            SSL_write(ssl, error_msg.c_str(), error_msg.size());
         }
     } else if (command == "GET_BALANCE") {
-        viewAccountDetails(account_number, conn, ssl);
+        try {
+            viewAccountDetails(account_number, conn, ssl);
+        } catch (const std::exception& e) {
+            std::string error_msg = "Error fetching account details: " + std::string(e.what()) + "\n";
+            SSL_write(ssl, error_msg.c_str(), error_msg.size());
+        }
     } else if (command == "DEPOSIT") {
-        std::string transac = jsonRequest["amount"].asString();
-        if (depositAccountDetails(account_number, pin, transac, conn)) {
-            SSL_write(ssl, "Account modification successful\n", 34);
-        } else {
-            SSL_write(ssl, "Account modification failed or authentication required\n", 56);
+        try {
+            std::string transac = jsonRequest["amount"].asString();
+            if (depositAccountDetails(account_number, pin, transac, conn)) {
+                SSL_write(ssl, "Account modification successful\n", 34);
+            } else {
+                SSL_write(ssl, "Account modification failed or authentication required\n", 56);
+            }
+        } catch (const std::exception& e) {
+            std::string error_msg = "Error during deposit: " + std::string(e.what()) + "\n";
+            SSL_write(ssl, error_msg.c_str(), error_msg.size());
         }
     } else if (command == "WITHDRAW") {
-        std::string transac = jsonRequest["amount"].asString();
-        if (withdrawAccountDetails(account_number, pin, transac, conn)) {
-            SSL_write(ssl, "Account modification successful\n", 34);
-        } else {
-            SSL_write(ssl, "Account modification failed or authentication required\n", 56);
+        try {
+            std::string transac = jsonRequest["amount"].asString();
+            if (withdrawAccountDetails(account_number, pin, transac, conn)) {
+                SSL_write(ssl, "Account modification successful\n", 34);
+            } else {
+                SSL_write(ssl, "Account modification failed or authentication required\n", 56);
+            }
+        } catch (const std::exception& e) {
+            std::string error_msg = "Error during withdrawal: " + std::string(e.what()) + "\n";
+            SSL_write(ssl, error_msg.c_str(), error_msg.size());
         }
     } else {
         SSL_write(ssl, "Unknown command\n", 16);
