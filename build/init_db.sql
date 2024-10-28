@@ -2,7 +2,7 @@ USE atm_bank_db;
 
 CREATE TABLE customers (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    account_number VARCHAR(20) UNIQUE,
+    account_number VARCHAR(255) UNIQUE,
     balance DOUBLE NOT NULL,
-    pin VARCHAR(100)
+    pin VARCHAR(255)
 );
