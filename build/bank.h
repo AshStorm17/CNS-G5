@@ -127,26 +127,42 @@ bool deleteAccount(const std::string& account_number, const std::string& pin, sq
 }
 
 // Function to view account details
-void viewAccountDetails(const std::string& account_number, sql::Connection *conn, SSL *ssl) {
+void viewAccountDetails(const std::string& account_number, const std::string& pin, sql::Connection *conn, SSL *ssl) {
     std::lock_guard<std::mutex> lock(db_mutex);
     sql::PreparedStatement *pstmt;
     sql::ResultSet *res;
+    bool authenticated = false;
 
-    pstmt = conn->prepareStatement("SELECT * FROM customers WHERE account_number = ?");
+    std::string hashed_pin = hashPin(pin);
+
+    pstmt = conn->prepareStatement("SELECT * FROM customers WHERE account_number = ?  AND pin = ?");
     pstmt->setString(1, account_number);
+    pstmt->setString(2, hashed_pin);
     res = pstmt->executeQuery();
 
     if (res->next()) {
-        std::string response = "Account Number: " + res->getString("account_number") + 
-                               "\nBalance: " + res->getString("balance") + "\n";
-        SSL_write(ssl, response.c_str(), response.size());
-    } else {
-        std::string response = "Account not found\n";
-        SSL_write(ssl, response.c_str(), response.size());
+        authenticated = true;
     }
 
     delete res;
     delete pstmt;
+
+    if (authenticated) {
+        if (res->next()) {
+            std::string response = "Account Number: " + res->getString("account_number") + 
+                                "\nBalance: " + res->getString("balance") + "\n";
+            SSL_write(ssl, response.c_str(), response.size());
+        } else {
+            std::string response = "Account not found\n";
+            SSL_write(ssl, response.c_str(), response.size());
+        }
+
+        delete res;
+        delete pstmt;
+    }
+    else{
+        throw std::runtime_error("User authentication failed!");
+    }
 }
 
 // Function to modify account details (e.g., update balance) with PIN authentication
@@ -385,7 +401,7 @@ void handleClient(int clientSocket, SSL *ssl, sql::Connection *conn, std::string
             success = deleteAccount(account_number, pin, conn);
             SSL_write(ssl, success ? "Account deletion successful\n" : "Account deletion failed\n", 30);
         } else if (command == "GET_BALANCE") {
-            viewAccountDetails(account_number, conn, ssl);
+            viewAccountDetails(account_number, pin, conn, ssl);
             success = true; // Assume success for read operations
         } else if (command == "DEPOSIT") {
             std::string transac = jsonRequest["amount"].asString();

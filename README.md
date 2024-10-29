@@ -34,11 +34,15 @@ make bank
 ./bank -p <port> -s <auth_file>
 ```
 
+The auth wile should be provided with an extension of .auth
+
 ## ATM
 The atm.cpp is the client-side application that communicates with the bank server. The script run_atm.sh is used to compile and execute the ATM client.
 ```
 ./atm -a <account> [-s <auth_file>] [-i <ip_address>] [-p <port>] [-c <card_file>] <mode>
 ```
+
+The card file should be provided with an extension of .card
 
 
 ## Team Members
@@ -48,6 +52,4 @@ The atm.cpp is the client-side application that communicates with the bank serve
 | Aashmun Gupta    | 22110005    |
 | Aryan Sahu       | 22110038    |
 | Aayush Parmar    | 22110181    |
-| Mrugank Patil    | 22110158    |
 | Arjun Sekar      | 22110034    |
-| Pratyaksh Bhayre | 22110       |

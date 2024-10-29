@@ -240,8 +240,6 @@ int main(int argc, char *argv[]) {
                     std::cerr << "Invalid auth name." << std::endl;
                     return 255;
                 }
-                cardFile = optarg;
-                break;
                 authFile = optarg;
                 break;
             case 'i':
